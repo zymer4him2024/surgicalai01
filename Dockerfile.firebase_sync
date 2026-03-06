@@ -1,0 +1,40 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Dockerfile.firebase_sync — Firebase Cloud Sync Agent 컨테이너
+#
+# 보안 설계:
+#   - Firebase 자격증명은 환경변수 또는 Docker secret으로 주입
+#   - .env 파일은 절대 이미지에 포함되지 않음 (COPY에서 제외)
+#   - 서비스 계정 JSON은 /run/secrets/ 마운트 권장
+#
+# 자격증명 주입 방법:
+#   방법 A: 환경변수 (docker-compose env_file)
+#     FIREBASE_CREDENTIALS_JSON={"type":"service_account",...}
+#   방법 B: Docker secret 파일 마운트
+#     FIREBASE_CREDENTIALS_PATH=/run/secrets/firebase-sa.json
+# ─────────────────────────────────────────────────────────────────────────────
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    libgl1 \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# 패키지 설치
+COPY requirements.firebase_sync.txt .
+RUN pip install --no-cache-dir -r requirements.firebase_sync.txt
+
+# 소스 코드 복사 (.env는 절대 포함하지 않음 — .dockerignore로 제외)
+COPY src/ /app/src/
+COPY pyproject.toml .
+
+# 큐 DB 저장 디렉터리 생성 (볼륨 마운트 대상)
+RUN mkdir -p /app/data
+
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+
+EXPOSE 8004

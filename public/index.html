@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ko" class="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SurgicalAI Company Dashboard</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="stylesheet" href="/tailwind-custom.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #0d0d0d;
+            color: #f5f5f7;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .glass {
+            background: rgba(28, 28, 30, 0.6);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        /* Glassmorphism Enhancements */
+        .glass-card {
+            background: rgba(28, 28, 30, 0.4);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .glass-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+
+        /* Scrollbar for feeds */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 10px;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.25);
+        }
+
+        /* Micro animations */
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .animate-fade-in {
+            animation: fadeIn 0.4s ease-out forwards;
+        }
+    </style>
+</head>
+
+<body class="p-6 md:p-12 relative min-h-screen">
+
+    <!-- Auth Overlay -->
+    <div id="auth-overlay"
+        class="absolute inset-0 z-50 bg-black/80 backdrop-blur-md flex flex-col items-center justify-center p-4">
+        <div class="glass text-center p-12 rounded-3xl max-w-sm w-full">
+            <h2 class="text-2xl font-semibold mb-2">Company Dashboard</h2>
+            <p class="text-appleMuted text-sm mb-8">Sign in with Google to continue</p>
+            <button
+                class="login-btn w-full bg-white text-black font-semibold py-3 px-4 rounded-xl shadow-lg hover:bg-gray-200 transition-colors">
+                Sign in with Google
+            </button>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div id="main-content" class="hidden">
+        <header class="mb-10 flex justify-between items-center max-w-6xl mx-auto">
+            <div>
+                <h1 class="text-3xl font-semibold tracking-wide">SurgicalAI Monitor</h1>
+                <p class="text-appleMuted mt-1 text-sm">Company Overview</p>
+            </div>
+            <div class="flex items-center gap-4">
+                <span id="user-email" class="text-sm text-appleMuted font-mono"></span>
+                <button
+                    class="logout-btn px-4 py-2 border border-gray-700 rounded-lg text-sm text-gray-300 hover:bg-gray-800 transition-colors">Sign
+                    Out</button>
+            </div>
+        </header>
+
+        <main class="max-w-6xl mx-auto space-y-6">
+
+            <!-- Top Row: Metrics & Status -->
+            <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-3 gap-6 animate-fade-in"
+                style="animation-delay: 0.1s;">
+                <!-- Success Rate (1 col) -->
+                <div class="glass-card rounded-2xl p-6 flex flex-col justify-center items-center text-center">
+                    <h3 class="text-appleMuted text-sm font-semibold uppercase tracking-wider mb-2">Today's Success</h3>
+                    <div id="metric-success"
+                        class="text-5xl font-bold text-green-500 mb-1 drop-shadow-[0_0_15px_rgba(34,197,94,0.3)]">0%
+                    </div>
+                    <div class="text-xs text-appleMuted">Total Scans: <span id="metric-total"
+                            class="font-semibold text-white">0</span></div>
+                </div>
+
+                <!-- Hourly Chart (2 cols) -->
+                <div class="glass-card rounded-2xl p-6 lg:col-span-2 flex flex-col">
+                    <h3 class="text-appleMuted text-sm font-semibold uppercase tracking-wider mb-4">Throughput Trend
+                    </h3>
+                    <div class="flex-1 min-h-[160px] relative">
+                        <canvas id="throughputChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Bottom Row: Analytics & Feed -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-in" style="animation-delay: 0.2s;">
+
+                <!-- Recent Inspections Timeline (2 cols) -->
+                <div class="glass-card rounded-2xl p-6 lg:col-span-2 flex flex-col h-[400px]">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-lg font-medium">Recent Operations</h2>
+                        <span
+                            class="text-xs px-2 py-1 bg-blue-500/20 text-blue-400 rounded-md font-medium tracking-wide">LIVE</span>
+                    </div>
+                    <div class="overflow-y-auto custom-scrollbar flex-1 pr-2 space-y-3" id="timeline-feed">
+                        <p class="text-appleMuted text-sm text-center mt-10">Waiting for data...</p>
+                    </div>
+                </div>
+
+                <!-- Top Missing Instruments (1 col) -->
+                <div class="glass-card rounded-2xl p-6 flex flex-col h-[400px]">
+                    <h2 class="text-lg font-medium mb-4">Top Missing Items <span
+                            class="text-xs font-normal text-appleMuted ml-1">(Today)</span></h2>
+                    <div class="overflow-y-auto custom-scrollbar flex-1 pr-2 space-y-4" id="missing-widget">
+                        <p class="text-appleMuted text-sm text-center mt-10">No errors recorded today.</p>
+                    </div>
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+    <script type="module" src="app.js"></script>
+</body>
+
+</html>

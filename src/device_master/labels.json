@@ -1,0 +1,81 @@
+{
+  "forceps": {
+    "fda_search_terms": ["forceps, tissue", "forceps, dressing", "forceps, sponge"],
+    "preferred_specialty": "General, Plastic Surgery",
+    "fallback_name": "Surgical Forceps",
+    "fallback_product_code": null,
+    "fallback_class": "I"
+  },
+  "scissors": {
+    "fda_search_terms": ["scissors, tissue", "scissors, operating", "scissors, dissecting"],
+    "preferred_specialty": "General, Plastic Surgery",
+    "fallback_name": "Surgical Scissors",
+    "fallback_product_code": null,
+    "fallback_class": "I"
+  },
+  "needle_holder": {
+    "fda_search_terms": ["holder, needle", "forceps, needle holder", "needle holder"],
+    "fallback_name": "Needle Holder",
+    "fallback_product_code": null,
+    "fallback_class": "I"
+  },
+  "clamp": {
+    "fda_search_terms": ["clamp, vascular", "forceps, hemostatic", "clamp, surgical"],
+    "fallback_name": "Surgical Clamp/Hemostat",
+    "fallback_product_code": null,
+    "fallback_class": "I"
+  },
+  "scalpel": {
+    "fda_search_terms": ["knife, surgical", "scalpel"],
+    "preferred_specialty": "General, Plastic Surgery",
+    "fallback_name": "Surgical Scalpel/Knife",
+    "fallback_product_code": null,
+    "fallback_class": "II"
+  },
+  "retractor": {
+    "fda_search_terms": ["retractor, self-retaining", "retractor, surgical", "retractor, hand"],
+    "fallback_name": "Surgical Retractor",
+    "fallback_product_code": null,
+    "fallback_class": "I"
+  },
+  "suction": {
+    "fda_search_terms": ["aspirator, surgical", "tube, suction, surgical", "suction, surgical"],
+    "preferred_specialty": "General, Plastic Surgery",
+    "fallback_name": "Surgical Suction Tube",
+    "fallback_product_code": null,
+    "fallback_class": "II"
+  },
+  "bovie": {
+    "fda_search_terms": ["electrosurgical, cutting & coagulation", "cautery, surgical", "electrosurgical unit"],
+    "preferred_specialty": "General, Plastic Surgery",
+    "fallback_name": "Electrosurgical Cautery (Bovie)",
+    "fallback_product_code": null,
+    "fallback_class": "II"
+  },
+  "sponge": {
+    "fda_search_terms": ["sponge, surgical", "sponge, laparotomy", "sponge, gauze"],
+    "preferred_specialty": "General, Plastic Surgery",
+    "fallback_name": "Surgical Sponge",
+    "fallback_product_code": null,
+    "fallback_class": "II"
+  },
+  "gauze": {
+    "fda_search_terms": ["dressing, gauze", "gauze, surgical", "sponge, gauze"],
+    "preferred_specialty": "General, Plastic Surgery",
+    "fallback_name": "Surgical Gauze",
+    "fallback_product_code": null,
+    "fallback_class": "II"
+  },
+  "towel_clip": {
+    "fda_search_terms": ["clip, towel", "towel clip", "forceps, towel"],
+    "fallback_name": "Towel Clip",
+    "fallback_product_code": null,
+    "fallback_class": "I"
+  },
+  "other_instrument": {
+    "fda_search_terms": ["instrument, surgical"],
+    "fallback_name": "Surgical Instrument",
+    "fallback_product_code": null,
+    "fallback_class": null
+  }
+}

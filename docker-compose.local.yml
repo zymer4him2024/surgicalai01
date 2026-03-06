@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  inference_agent:
+    # Remove hardware device mappings for macOS simulation
+    devices: []
+    device_cgroup_rules: []
+    # Ensure it uses simulation mode (InferenceAgent code handles this if HEF is missing)
+    environment:
+      - HEF_PATH=/app/models/non_existent.hef
+      - HAILO_DEVICE=/dev/null
+
+  camera_agent:
+    # Remove camera device mapping for macOS (OpenCV can use index or file instead)
+    devices: []

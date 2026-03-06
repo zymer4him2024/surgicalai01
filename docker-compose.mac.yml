@@ -1,0 +1,209 @@
+networks:
+  antigravity_bridge:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+services:
+  gateway_agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python -m src.gateway.main
+    container_name: gateway_agent
+    environment:
+      - MODULE_NAME=GatewayAgent
+      - QR_SCAN_INTERVAL_SEC=1.0
+      - QR_DEBOUNCE_SEC=30.0
+      - DEFAULT_TARGET={}
+      - DEVICE_MASTER_URL=http://device_master_agent:8005
+    depends_on:
+      - device_master_agent
+    healthcheck:
+      interval: 30s
+      retries: 3
+      test:
+        - CMD
+        - curl
+        - -f
+        - http://localhost:8000/health
+      timeout: 10s
+    networks:
+      antigravity_bridge:
+        ipv4_address: 172.20.0.10
+    ports:
+      - 8000:8000
+    restart: unless-stopped
+    volumes:
+      - ./src:/app/src:ro
+
+  inference_agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.inference
+    command: python -m src.inference.main
+    container_name: inference_agent
+    environment:
+      - MODULE_NAME=InferenceAgent
+      - HAILO_DEVICE=/dev/null
+      - HEF_PATH=/app/models/simulation.hef
+      - TEMP_WARNING_CELSIUS=85.0
+      - TEMP_CRITICAL_CELSIUS=95.0
+      - INFERENCE_TIMEOUT_SEC=10
+      - PYTHONUNBUFFERED=1
+    expose:
+      - '8001'
+    healthcheck:
+      interval: 30s
+      retries: 3
+      start_period: 20s
+      test:
+        - CMD
+        - curl
+        - -f
+        - http://localhost:8001/health
+      timeout: 10s
+    mem_limit: 2g
+    memswap_limit: 2g
+    networks:
+      antigravity_bridge:
+        ipv4_address: 172.20.0.11
+    restart: unless-stopped
+    shm_size: 512mb
+    ulimits:
+      nofile:
+        hard: 65535
+        soft: 65535
+    volumes:
+      - ./src:/app/src:ro
+      - ./models:/app/models:ro
+
+  camera_agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python -m src.camera.main
+    container_name: camera_agent
+    environment:
+      - MODULE_NAME=CameraAgent
+      - CAMERA_INDEX=0
+    expose:
+      - '8002'
+    healthcheck:
+      interval: 30s
+      retries: 3
+      test:
+        - CMD
+        - curl
+        - -f
+        - http://localhost:8002/health
+      timeout: 10s
+    networks:
+      antigravity_bridge:
+        ipv4_address: 172.20.0.12
+    restart: unless-stopped
+    volumes:
+      - ./src:/app/src:ro
+
+  firebase_sync_agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.firebase_sync
+    command: python -m src.firebase_sync.main
+    container_name: firebase_sync_agent
+    env_file:
+      - .env # .env에서 Firebase 설정 주입 (자격증명 포함)
+    environment:
+      - MODULE_NAME=FirebaseSyncAgent
+      - DISPLAY_URL=http://display_agent:8003
+      - GATEWAY_URL=http://gateway_agent:8000
+      - QUEUE_DB_PATH=/app/data/queue.db
+      - QUEUE_POLL_SEC=5
+    ports:
+      - "8004:8004" # 테스트 접근용 (mac 전용, prod에서는 제거)
+    expose:
+      - '8004'
+    healthcheck:
+      interval: 30s
+      retries: 3
+      start_period: 10s
+      test:
+        - CMD
+        - curl
+        - -f
+        - http://localhost:8004/health
+      timeout: 10s
+    networks:
+      antigravity_bridge:
+        ipv4_address: 172.20.0.14
+    restart: unless-stopped
+    volumes:
+      - ./src:/app/src:ro
+      - ./data:/app/data # SQLite 큐 DB 영속화
+      - ./firebase-credentials.json:/app/firebase-credentials.json:ro
+    depends_on:
+      - display_agent
+
+  display_agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.display
+    command: python -m src.display.main
+    container_name: display_agent
+    environment:
+      - MODULE_NAME=DisplayAgent
+      - DISPLAY_HEADLESS=true # Mac: 창 없이 버퍼만 렌더 (/snapshot으로 확인)
+      - DISPLAY_WIDTH=1920
+      - DISPLAY_HEIGHT=1080
+      - DISPLAY_FPS=30
+    expose:
+      - '8003'
+    healthcheck:
+      interval: 30s
+      retries: 3
+      start_period: 5s
+      test:
+        - CMD
+        - curl
+        - -f
+        - http://localhost:8003/health
+      timeout: 10s
+    networks:
+      antigravity_bridge:
+        ipv4_address: 172.20.0.13
+    restart: unless-stopped
+    volumes:
+      - ./src:/app/src:ro
+
+  device_master_agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.device_master
+    command: python -m src.device_master.main
+    container_name: device_master_agent
+    environment:
+      - MODULE_NAME=DeviceMasterAgent
+      - DEVICE_CACHE_PATH=/app/data/device_cache.json
+      - DEVICE_CACHE_TTL_HOURS=168
+    expose:
+      - '8005'
+    ports:
+      - '8005:8005' # Mac: 테스트 접근용
+    healthcheck:
+      interval: 30s
+      retries: 3
+      start_period: 15s # openFDA 초기 조회 대기
+      test:
+        - CMD
+        - curl
+        - -f
+        - http://localhost:8005/health
+      timeout: 10s
+    networks:
+      antigravity_bridge:
+        ipv4_address: 172.20.0.15
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data # 캐시 파일 영속화
+      - ./firebase-credentials.json:/app/firebase-credentials.json:ro

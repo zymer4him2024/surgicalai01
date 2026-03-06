@@ -1,0 +1,16 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# requirements.display.txt — Display Agent 전용 패키지
+# opencv-python: GUI 윈도우 지원 (headless 버전 아님)
+# ─────────────────────────────────────────────────────────────────────────────
+
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+python-multipart==0.0.12
+
+# OpenCV (GUI 창 지원 빌드 — RPi5 X11용)
+# Mac 헤드리스 시뮬레이션에서는 imshow 호출 안 하므로 동일 패키지 사용 가능
+opencv-python==4.10.0.84
+
+numpy==1.26.4
+pydantic==2.9.2
+requests==2.32.3

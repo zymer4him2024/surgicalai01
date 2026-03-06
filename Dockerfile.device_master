@@ -1,0 +1,18 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.device_master.txt .
+RUN pip install --no-cache-dir -r requirements.device_master.txt
+
+COPY src/ /app/src/
+
+RUN mkdir -p /app/data
+
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+
+EXPOSE 8005

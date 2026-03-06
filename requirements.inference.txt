@@ -1,0 +1,22 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# requirements.inference.txt
+# Inference Agent 전용 패키지 목록
+# hailort는 Dockerfile.inference 에서 별도 .whl로 설치됩니다.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# API 서버
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+python-multipart==0.0.12      # 이미지 multipart/form-data 파싱
+
+# 이미지 처리
+numpy==1.26.4
+Pillow==10.4.0
+opencv-python-headless==4.10.0.84
+
+# 데이터 검증
+pydantic==2.9.2
+
+# 유틸
+requests==2.32.3
+psutil==6.0.0                 # 시스템 리소스 모니터링 (fallback 온도 읽기)

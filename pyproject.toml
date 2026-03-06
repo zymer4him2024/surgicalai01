@@ -1,0 +1,33 @@
+[tool.poetry]
+name = "antigravity-surgical-ai"
+version = "0.1.0"
+description = "Surgical AI Object Detection System for Raspberry Pi 5 and Hailo-8"
+authors = ["Admin"]
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+exclude = [
+    ".git",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".venv",
+    "venv",
+    "__pypackages__",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "B", "I"]
+ignore = []
+
+[tool.pyright]
+include = ["src"]
+exclude = ["**/__pycache__", "venv", ".venv"]
+strict = ["src"]
+reportMissingImports = true
+reportMissingTypeStubs = false
+pythonVersion = "3.10"

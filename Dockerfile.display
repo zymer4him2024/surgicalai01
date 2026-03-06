@@ -1,0 +1,46 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Dockerfile.display — HDMI Display Agent 컨테이너
+#
+# 의존성:
+#   - X11 서버가 호스트에서 실행 중이어야 합니다 (RPi5: startx 또는 lightdm)
+#   - DISPLAY=:0 환경 변수 필요
+#   - /tmp/.X11-unix 소켓 볼륨 마운트 필요
+#
+# Mac 시뮬레이션:
+#   DISPLAY_HEADLESS=true 환경 변수로 창 없이 실행
+# ─────────────────────────────────────────────────────────────────────────────
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# ── OpenCV GUI + X11 런타임 의존성 ──────────────────────────────────────────
+# Debian Trixie(python:3.11-slim 기반) 패키지명 기준
+# libgl1-mesa-glx → libgl1 (Trixie에서 분리됨)
+# libgdk-pixbuf2.0-0 → libgdk-pixbuf-xlib-2.0-0
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    libgl1 \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
+    libx11-6 \
+    libgtk-3-0 \
+    libgdk-pixbuf-xlib-2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Python 패키지 ─────────────────────────────────────────────────────────────
+COPY requirements.display.txt .
+RUN pip install --no-cache-dir -r requirements.display.txt
+
+# ── 소스 코드 ─────────────────────────────────────────────────────────────────
+COPY src/ /app/src/
+COPY pyproject.toml .
+
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+# X11 MIT-SHM 비활성화 (컨테이너 내 공유 메모리 충돌 방지)
+ENV QT_X11_NO_MITSHM=1
+
+EXPOSE 8003

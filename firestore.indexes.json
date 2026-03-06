@@ -1,0 +1,47 @@
+{
+    "indexes": [
+        {
+            "collectionGroup": "sync_events",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "event_type",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "timestamp",
+                    "order": "DESCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "sync_events",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "event_type",
+                    "order": "DESCENDING"
+                },
+                {
+                    "fieldPath": "timestamp",
+                    "order": "DESCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "inspections",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "event_type",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "timestamp",
+                    "order": "DESCENDING"
+                }
+            ]
+        }
+    ],
+    "fieldOverrides": []
+}

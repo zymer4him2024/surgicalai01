@@ -1,0 +1,11 @@
+ruff
+pyright
+pytest
+fastapi
+uvicorn[standard]
+requests
+httpx==0.27.2          # Gateway 비동기 HTTP 프록시
+python-multipart==0.0.12  # multipart/form-data 파싱 (이미지 업로드)
+opencv-python-headless    # 카메라 프레임 캡처 및 이미지 디코딩
+pyzbar                    # QR 코드 디코딩 (libzbar0 필요)
+firebase-admin            # Firebase Firestore/Storage 연동

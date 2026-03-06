@@ -1,0 +1,67 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Dockerfile.inference
+# Hailo-8 AI Inference Container — 산업용 고안정성 이미지
+#
+# 전제 조건:
+#   1. 호스트에 hailort 커널 드라이버가 로드되어 있어야 합니다.
+#      (호스트에서: sudo modprobe hailo_pci)
+#   2. /dev/hailo0 디바이스 노드가 호스트에 존재해야 합니다.
+#   3. HEF 모델 파일을 ./models/ 디렉터리에 배치해 주세요.
+#      (예: ./models/yolov8n.hef)
+#
+# hailort Python 패키지는 Hailo Developer Zone에서 다운로드 후
+# ./packages/ 폴더에 .whl 파일로 배치해야 합니다.
+# ─────────────────────────────────────────────────────────────────────────────
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# ── 시스템 의존성 설치 ────────────────────────────────────────────────────────
+# libpciaccess: PCIe 디바이스 접근 라이브러리
+# libgomp1: OpenMP (Hailo SDK 내부 병렬 처리)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    libpciaccess0 \
+    libgomp1 \
+    usbutils \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Python 의존성 설치 ────────────────────────────────────────────────────────
+COPY requirements.inference.txt .
+RUN pip install --no-cache-dir -r requirements.inference.txt
+
+# ── hailort Python 패키지 설치 (로컬 .whl) ──────────────────────────────────
+# Hailo Developer Zone(https://hailo.ai/developer-zone/)에서 다운로드한
+# hailort-*.whl 파일을 ./packages/ 에 배치한 뒤 빌드하세요.
+# 파일이 없으면 이 단계는 스킵되고 시뮬레이션 모드로 동작합니다.
+COPY packages/ /tmp/packages/
+RUN if ls /tmp/packages/hailort*.whl 1>/dev/null 2>&1; then \
+    pip install --no-cache-dir /tmp/packages/hailort*.whl; \
+    echo "hailort installed from .whl"; \
+    else \
+    echo "WARNING: hailort .whl not found — simulation mode will be used"; \
+    fi && rm -rf /tmp/packages
+
+# ── 소스 코드 복사 ────────────────────────────────────────────────────────────
+COPY src/ /app/src/
+COPY pyproject.toml .
+
+# ── models 디렉터리 생성 (볼륨 마운트 대상) ──────────────────────────────────
+RUN mkdir -p /app/models
+
+# ── 환경 변수 ─────────────────────────────────────────────────────────────────
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+
+# ── 비 루트 사용자로 실행 환경 준비 ──────────────────────────────────────────
+# hailo 디바이스 접근을 위해 dialout/video 그룹 추가
+# -m: 홈 디렉토리 생성 (Hailo SDK 로그 저장소용: ~/.hailo)
+RUN groupadd -r appuser && useradd -m -r -g appuser appuser \
+    && usermod -aG dialout,video appuser
+
+# 기본적으로 root로 실행하여 하드웨어 접근 권한 문제를 방지합니다.
+# 보안이 중요한 경우 docker-compose에서 user: appuser로 전환 가능합니다.
+# USER appuser
+
+EXPOSE 8001
