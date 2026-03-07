@@ -1,17 +1,17 @@
 """
 main.py — Device Master Agent (Port 8005)
 
-openFDA Device Classification API 데이터를 캐시하여
-YOLO 탐지 레이블 → FDA 표준 기기 정보 조회 서비스 제공.
+Caches openFDA Device Classification API data and provides
+YOLO detection label → FDA standard device info lookup.
 
-실제 배포 시 이 컨테이너 대신 병원/업체 내부 MDM 서버를 바라보도록
-DEVICE_MASTER_URL 환경변수만 변경하면 나머지 아키텍처는 동일하게 유지됩니다.
+In production, replace this container by pointing DEVICE_MASTER_URL
+to the hospital's internal MDM server — no other architecture changes needed.
 
-엔드포인트:
-  GET  /health                — 모듈 상태 + 캐시 정보
-  GET  /device/lookup?label=  — 단일 레이블 FDA 정보 조회
-  GET  /device/labels         — 전체 캐시 목록
-  POST /device/refresh        — openFDA 재조회 강제 실행
+Endpoints:
+  GET  /health                — module status + cache info
+  GET  /device/lookup?label=  — single label FDA info lookup
+  GET  /device/labels         — full cache list
+  POST /device/refresh        — force openFDA re-fetch
 """
 
 from __future__ import annotations
@@ -36,11 +36,13 @@ logging.basicConfig(
 logger = logging.getLogger("device_master.main")
 
 MODULE_NAME = os.getenv("MODULE_NAME", "DeviceMasterAgent")
+HOSPITAL_API_URL = os.getenv("HOSPITAL_API_URL", "").rstrip("/")
+HOSPITAL_API_KEY = os.getenv("HOSPITAL_API_KEY", "")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    logger.info("Device Master Agent starting — building cache from openFDA…")
+    logger.info("Device Master Agent starting — building cache from openFDA...")
     await cache.build()
     logger.info("Cache ready: %d labels", len(cache.all_entries()))
     yield
@@ -50,8 +52,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 app = FastAPI(
     title="Device Master Agent API",
     description=(
-        "openFDA 기반 수술 기구 표준 정보 조회 서비스. "
-        "실제 병원 MDM 시스템으로 교체 시 DEVICE_MASTER_URL 환경변수만 변경."
+        "Surgical instrument standard info lookup via openFDA. "
+        "Swap DEVICE_MASTER_URL to point at a real hospital MDM system."
     ),
     version="1.0.0",
     lifespan=lifespan,
@@ -59,7 +61,7 @@ app = FastAPI(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 엔드포인트
+# Endpoints
 # ─────────────────────────────────────────────────────────────────────────────
 
 @app.get("/health", response_model=HealthResponse)
@@ -80,25 +82,30 @@ async def health_check() -> HealthResponse:
 @app.get(
     "/device/lookup",
     response_model=DeviceLookupResponse,
-    summary="YOLO 레이블 → FDA 기기 정보 조회",
+    summary="YOLO label → FDA device info lookup",
 )
 async def lookup_device(label: str) -> DeviceLookupResponse:
     """
-    label: YOLO 탐지 레이블 (e.g. "forceps", "scalpel")
-    - 캐시 히트: 즉시 반환 (data_source="cache")
-    - 캐시 미스: openFDA 실시간 조회 시도 (data_source="openfda_live")
-    - 조회 실패: labels.json fallback 또는 404
+    label: YOLO detection label (e.g. "forceps", "scalpel")
+    - Cache hit: return immediately (data_source="cache")
+    - Cache miss: attempt live openFDA query (data_source="openfda_live")
+    - Query failure: labels.json fallback or 404
     """
     normalized = label.lower().strip()
 
-    # 1) 캐시 히트
     entry = cache.get(normalized)
     if entry is not None:
         return entry
 
-    # 2) 캐시 미스 → openFDA 실시간 조회
-    logger.info("Cache miss for label=%r — querying openFDA live", normalized)
-    from src.device_master.cache import _load_labels_json, _fetch_label
+    if HOSPITAL_API_URL:
+        hospital_entry = await _fetch_from_hospital_api(normalized)
+        if hospital_entry is not None:
+            cache.set(normalized, hospital_entry)
+            logger.info("Hospital API hit: %r → %s", normalized, hospital_entry.device_name)
+            return hospital_entry
+
+    logger.info("Cache miss for label=%r — using local fallback", normalized)
+    from src.device_master.cache import _load_labels_json
     labels_config = _load_labels_json()
     cfg = labels_config.get(normalized)
 
@@ -109,17 +116,17 @@ async def lookup_device(label: str) -> DeviceLookupResponse:
                    "Add it to labels.json and call POST /device/refresh.",
         )
 
-    async with httpx.AsyncClient(timeout=8.0) as client:
-        result = await _fetch_label(client, normalized, cfg)
+    from src.device_master.schemas import DeviceLookupResponse as _DR
+    return _DR(
+        yolo_label=normalized,
+        device_name=cfg.get("fallback_name", label),
+        product_code=cfg.get("fallback_product_code"),
+        device_class=cfg.get("fallback_class"),
+        data_source="fallback",
+    )
 
-    result.data_source = "openfda_live"
-    return result
 
-
-@app.get(
-    "/device/labels",
-    summary="전체 캐시 목록 조회",
-)
+@app.get("/device/labels", summary="Full cache list")
 async def list_labels() -> JSONResponse:
     entries = cache.all_entries()
     return JSONResponse({
@@ -131,7 +138,7 @@ async def list_labels() -> JSONResponse:
 @app.post(
     "/device/refresh",
     status_code=status.HTTP_202_ACCEPTED,
-    summary="openFDA 재조회 강제 실행",
+    summary="Force openFDA re-fetch",
 )
 async def refresh_cache() -> JSONResponse:
     logger.info("Cache refresh requested")
@@ -143,8 +150,35 @@ async def refresh_cache() -> JSONResponse:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 헬퍼
+# Helpers
 # ─────────────────────────────────────────────────────────────────────────────
+
+async def _fetch_from_hospital_api(label: str) -> DeviceLookupResponse | None:
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.post(
+                f"{HOSPITAL_API_URL}/instruments/lookup",
+                json={"labels": [label]},
+                headers={"X-API-Key": HOSPITAL_API_KEY},
+            )
+        if resp.status_code != 200:
+            logger.warning("Hospital API returned %d for label=%r", resp.status_code, label)
+            return None
+        match = resp.json().get("matches", {}).get(label)
+        if not match:
+            return None
+        return DeviceLookupResponse(
+            yolo_label=label,
+            device_name=match["name"],
+            product_code=match.get("catalog_id"),
+            device_class=match.get("device_class"),
+            medical_specialty=match.get("tray_location"),
+            data_source="hospital_api",
+        )
+    except Exception as exc:
+        logger.warning("Hospital API unreachable for label=%r: %s", label, exc)
+        return None
+
 
 async def _check_openfda() -> bool:
     try:
@@ -159,7 +193,7 @@ async def _check_openfda() -> bool:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 엔트리포인트
+# Entry point
 # ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

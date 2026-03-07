@@ -68,7 +68,7 @@ function openSnapshots(urls) {
 // Data Processing
 function processData(eventsData) {
     if (eventsData.length === 0) {
-        errorTableBody.innerHTML = '<tr><td colspan="4" class="py-6 px-4 text-center text-appleMuted">No recent errors detected.</td></tr>';
+        errorTableBody.innerHTML = '<tr><td colspan="4" class="py-12 px-6 text-center text-appleMuted italic">No recent errors detected in the last 50 events.</td></tr>';
         return;
     }
 
@@ -78,18 +78,25 @@ function processData(eventsData) {
         const jobId = err.metadata?.job_id || 'Unknown';
         const reason = err.metadata?.reason || err.event_type;
         const tr = document.createElement('tr');
-        tr.className = 'hover:bg-white/5 transition-colors';
+        tr.className = 'group hover:bg-white/[0.03] transition-all border-b border-white/5 last:border-0';
 
-        let btnHtml = '<span class="text-gray-600">No Snaps</span>';
+        let btnHtml = '<span class="text-xs text-gray-600 font-medium">No Snapshots</span>';
         if (err.snapshot_urls && err.snapshot_urls.length > 0) {
-            btnHtml = `<button class="view-btn px-4 py-1.5 bg-red-500/10 border border-red-500/30 rounded-lg font-semibold hover:bg-red-500/20 text-red-400 transition-colors">View Snaps</button>`;
+            btnHtml = `<button class="view-btn px-4 py-1.5 bg-red-500/10 border border-red-500/20 rounded-xl text-[10px] font-bold uppercase tracking-wider text-red-400 hover:bg-red-500/20 transition-all shadow-sm">View Snaps</button>`;
         }
 
         tr.innerHTML = `
-            <td class="py-3 px-4 tracking-wide">${timeStr}</td>
-            <td class="py-3 px-4 font-mono font-medium">${jobId}</td>
-            <td class="py-3 px-4"><span class="px-2 py-1 bg-red-500/20 text-red-500 rounded text-xs font-bold tracking-wide uppercase">${reason}</span></td>
-            <td class="py-3 px-4">${btnHtml}</td>
+            <td class="py-4 px-6">
+                <div class="flex flex-col">
+                    <span class="text-white font-medium">${timeStr.split(', ')[1]}</span>
+                    <span class="text-[10px] text-appleMuted">${timeStr.split(', ')[0]}</span>
+                </div>
+            </td>
+            <td class="py-4 px-6 font-mono font-semibold text-blue-400/80 group-hover:text-blue-400 transition-colors">${jobId}</td>
+            <td class="py-4 px-6">
+                <span class="status-badge badge-error">${reason}</span>
+            </td>
+            <td class="py-4 px-6 text-right">${btnHtml}</td>
         `;
 
         if (err.snapshot_urls && err.snapshot_urls.length > 0) {
@@ -110,9 +117,9 @@ const detectionList = document.getElementById('detection-list');
 const statusAge = document.getElementById('status-age');
 
 const STATE_STYLES = {
-    MATCH: 'bg-green-500/20 border border-green-500/50 text-green-400',
-    ERROR: 'bg-red-500/20 border border-red-500/50 text-red-400',
-    READY: 'bg-yellow-500/20 border border-yellow-500/50 text-yellow-400',
+    MATCH: 'badge-match',
+    ERROR: 'badge-error',
+    READY: 'badge-ready',
 };
 
 function renderStatusCard(data) {
@@ -122,19 +129,19 @@ function renderStatusCard(data) {
     const running = data.inference_running;
 
     // State badge
-    stateBadge.className = `px-5 py-3 rounded-xl text-lg font-bold tracking-widest uppercase min-w-[110px] text-center transition-all duration-500 ${STATE_STYLES[state] || 'bg-gray-700 text-gray-300'}`;
+    stateBadge.className = `status-badge ${STATE_STYLES[state] || 'bg-gray-700 text-gray-300'} text-sm px-6 py-2 transition-all duration-500 shadow-lg`;
     stateBadge.textContent = state;
 
     // Running pill
-    runningPill.className = `px-2 py-0.5 rounded-full text-xs font-semibold ${running ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`;
-    runningPill.textContent = running ? '● Running' : '● Stopped';
+    runningPill.className = `px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${running ? 'bg-green-500/15 text-green-400 border border-green-500/20' : 'bg-red-500/15 text-red-400 border border-red-500/20'}`;
+    runningPill.textContent = running ? 'System Active' : 'System Paused';
 
     // Job info
     if (job) {
         jobIdEl.textContent = job.id || 'Unknown';
         const target = job.target || {};
         targetTags.innerHTML = Object.entries(target)
-            .map(([k, v]) => `<span class="px-2 py-0.5 bg-white/10 rounded text-xs font-mono">${k} ×${v}</span>`)
+            .map(([k, v]) => `<span class="px-2 py-1 bg-white/[0.05] border border-white/10 rounded-lg text-[10px] font-mono text-gray-300">${k} ×${v}</span>`)
             .join('');
     } else {
         jobIdEl.textContent = 'No active job';
@@ -145,18 +152,18 @@ function renderStatusCard(data) {
     if (detections.length > 0) {
         detectionList.innerHTML = detections.map(d => {
             const fdaBadge = d.fda_class
-                ? `<span class="px-1.5 py-0.5 bg-blue-500/20 text-blue-400 rounded text-xs font-bold">[${d.fda_class}]</span>`
+                ? `<span class="px-2 py-0.5 bg-blue-500/15 text-blue-400 border border-blue-500/20 rounded-lg text-[9px] font-bold uppercase">${d.fda_class}</span>`
                 : '';
             const name = d.device_name || d.class_name;
-            return `<div class="flex items-center gap-3 py-1.5 border-b border-white/5 last:border-0">
-                <span class="font-mono text-sm w-28 shrink-0">${d.class_name}</span>
-                <span class="text-white font-semibold w-8 shrink-0">×${d.count}</span>
+            return `<div class="flex items-center gap-4 py-2.5 border-b border-white/5 last:border-0 group">
+                <span class="font-mono text-xs w-28 shrink-0 text-white/60 group-hover:text-white transition-colors uppercase tracking-tighter">${d.class_name}</span>
+                <span class="text-white font-bold w-10 shrink-0 text-base">×${d.count}</span>
                 ${fdaBadge}
-                <span class="text-appleMuted text-sm truncate">${name}</span>
+                <span class="text-appleMuted text-xs truncate font-medium ml-1">${name}</span>
             </div>`;
         }).join('');
     } else {
-        detectionList.innerHTML = '<p class="text-sm text-appleMuted italic">No detections yet</p>';
+        detectionList.innerHTML = '<p class="text-sm text-appleMuted italic py-4">Waiting for real-time detections...</p>';
     }
 }
 
@@ -268,23 +275,27 @@ function renderPresetSets() {
     const rows = PRESET_SETS.map((set, idx) => {
         const nonZero = Object.entries(set.counts).filter(([, v]) => v > 0);
         const summary = nonZero.length
-            ? nonZero.map(([k, v]) => `${k} ×${v}`).join(', ')
-            : '—';
-        return `<tr class="preset-row border-b border-white/5 hover:bg-white/5 cursor-default transition-colors" data-idx="${idx}">
-            <td class="py-3 px-4 text-sm font-semibold text-blue-400 w-16">${set.label}</td>
-            <td class="py-3 px-4 text-sm text-gray-300">${summary}</td>
-        </tr>`;
+            ? nonZero.map(([k, v]) => `<span class="inline-block bg-white/5 border border-white/10 rounded-lg px-2 py-0.5 text-[10px] m-0.5 text-gray-400 font-mono">${k} ×${v}</span>`).join(' ')
+            : '<span class="text-appleMuted italic text-xs ml-2">—</span>';
+        return `<div class="preset-row flex items-center p-3 border-b border-white/5 last:border-0 hover:bg-white/[0.03] transition-all group" data-idx="${idx}">
+            <div class="w-12 shrink-0 text-center">
+                <span class="text-[10px] font-bold text-blue-500/60 group-hover:text-blue-500 transition-colors uppercase tracking-widest">${idx + 1}</span>
+            </div>
+            <div class="flex-1 min-w-0">
+                <div class="flex flex-wrap items-center">
+                    ${summary}
+                </div>
+            </div>
+        </div>`;
     }).join('');
 
-    container.innerHTML = `<table class="w-full text-left border-collapse">
-        <thead>
-            <tr class="text-appleMuted text-xs uppercase tracking-widest border-b border-gray-700">
-                <th class="pb-2 px-4 font-medium w-16">#</th>
-                <th class="pb-2 px-4 font-medium">Instruments</th>
-            </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-    </table>`;
+    container.innerHTML = `<div class="w-full">
+        <div class="flex items-center px-4 py-2 bg-white/5 border-b border-white/10 rounded-t-xl">
+            <span class="text-[9px] font-bold uppercase tracking-[0.2em] text-appleMuted w-12 text-center">Set</span>
+            <span class="text-[9px] font-bold uppercase tracking-[0.2em] text-appleMuted">Configured Instruments</span>
+        </div>
+        <div class="divide-y divide-white/5">${rows}</div>
+    </div>`;
 }
 
 function initTargetConfig() {

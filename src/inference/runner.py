@@ -1,14 +1,14 @@
 """
-runner.py — 별도 프로세스에서 실행되는 Hailo-8 추론 워커
+runner.py — Hailo-8 inference worker (runs in a separate process)
 
-설계 목적:
-  - FastAPI 메인 프로세스와 분리하여 NPU 드라이버 메모리 누수 격리
-  - 추론 프로세스 크래시 시 FastAPI 서버는 영향받지 않음
-  - 프로세스 재시작으로 메모리/리소스 완전 정리 가능
+Design intent:
+  - Isolate NPU driver memory from the FastAPI main process
+  - A crash in the inference process does not affect the FastAPI server
+  - Full memory/resource cleanup is possible via process restart
 
-통신 방식:
-  - request_queue  : (request_id, image_bytes) 전송
-  - response_queue : (request_id, result_dict | error_str) 수신
+Communication:
+  - request_queue  : send (request_id, image_bytes)
+  - response_queue : receive (request_id, result_dict | error_str)
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# COCO 80-class 레이블 (YOLOv8 기본 모델용 — POC 데모)
+# COCO 80-class labels (YOLOv8 default model — POC demo)
 # ─────────────────────────────────────────────────────────────────────────────
 DEFAULT_CLASS_NAMES: list[str] = [
     "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train",
@@ -44,8 +44,8 @@ DEFAULT_CLASS_NAMES: list[str] = [
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
-# POC 매핑: COCO 클래스 → 수술 기구 명칭
-# 이 매핑에 포함된 클래스만 디스플레이에 표시됨
+# POC mapping: COCO class → surgical instrument name
+# Only classes in this mapping are shown in the display.
 # ─────────────────────────────────────────────────────────────────────────────
 SURGICAL_MAPPING: dict[str, str] = {
     "scissors": "Surgical Scissors",
@@ -60,27 +60,27 @@ SURGICAL_MAPPING: dict[str, str] = {
     "toothbrush": "Brush",
 }
 
-# 모델 입력 해상도 (YOLOv8: 640x640)
+# Model input resolution (YOLOv8: 640x640)
 INPUT_SIZE = 640
 
-# NMS 파라미터 (COCO 모델은 정확하므로 낮은 임계값 사용 가능)
+# NMS parameters
 CONF_THRESHOLD = 0.50
 IOU_THRESHOLD = 0.45
 
-# COCO 모델은 Background 클래스 없음
+# COCO model has no Background class
 SKIP_BACKGROUND = False
 
-# 출력 구조 로깅 플래그 (첫 추론 시 1회만 출력)
+# Flag to log output structure once on first inference
 _hailo_output_logged = False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# POC: COCO → 수술 기구 매핑 필터
+# POC: COCO → surgical instrument mapping filter
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _apply_surgical_mapping(detections: list[dict]) -> list[dict]:
-    """COCO 탐지 결과를 수술 기구 명칭으로 변환.
-    SURGICAL_MAPPING에 없는 클래스는 완전히 제거됩니다.
+    """Convert COCO detection results to surgical instrument names.
+    Classes not in SURGICAL_MAPPING are dropped entirely.
     """
     mapped = []
     for det in detections:
@@ -89,13 +89,13 @@ def _apply_surgical_mapping(detections: list[dict]) -> list[dict]:
             mapped.append({
                 **det,
                 "class_name": SURGICAL_MAPPING[coco_name],
-                "coco_class": coco_name,  # 원본 COCO 이름 보존
+                "coco_class": coco_name,  # preserve original COCO name
             })
     return mapped
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 추론 워커 함수 (별도 프로세스에서 실행)
+# Inference worker function (runs in a separate process)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def inference_worker(
@@ -105,9 +105,8 @@ def inference_worker(
     stop_event: mp.Event,  # type: ignore[type-arg]
 ) -> None:
     """
-    NPU 추론 루프.
-    프로세스가 시작되면 HEF를 로드하고, request_queue를 폴링하며
-    추론 결과를 response_queue에 전송합니다.
+    NPU inference loop.
+    On start, loads the HEF, polls request_queue, and sends results to response_queue.
     """
     logging.basicConfig(
         level=logging.INFO,
@@ -115,7 +114,7 @@ def inference_worker(
     )
     log = logging.getLogger("inference_worker")
 
-    # Hailo SDK 또는 시뮬레이션 모드 선택
+    # Select Hailo SDK or simulation mode
     sdk_available = _try_load_hailo(hef_path, log)
 
     log.info(
@@ -126,7 +125,7 @@ def inference_worker(
 
     while not stop_event.is_set():
         try:
-            # 큐에서 요청 수신 (timeout으로 stop_event 폴링 보장)
+            # Receive request from queue (timeout ensures stop_event is polled)
             item = request_queue.get(timeout=1.0)
         except Exception:
             continue
@@ -141,7 +140,7 @@ def inference_worker(
                 if sdk_available
                 else _run_simulation_inference(image_bytes)
             )
-            # POC: COCO → 수술 기구 매핑 적용 (매핑에 없는 클래스 필터링)
+            # POC: apply COCO → surgical instrument mapping (filter unmapped classes)
             detections = _apply_surgical_mapping(detections)
             elapsed_ms = (time.perf_counter() - start) * 1000
 
@@ -165,14 +164,14 @@ def inference_worker(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Hailo SDK 래퍼 (선택적 의존성)
+# Hailo SDK wrapper (optional dependency)
 # ─────────────────────────────────────────────────────────────────────────────
 
-_hailo_infer_model: Any = None          # SDK InferModel 객체 (전역, 프로세스 내)
+_hailo_infer_model: Any = None          # SDK InferModel object (global, per-process)
 
 
 def _try_load_hailo(hef_path: str, log: logging.Logger) -> bool:
-    """hailort SDK로 HEF 로드 시도. 실패 시 False 반환 (시뮬레이션 모드)."""
+    """Attempt to load HEF via hailort SDK. Returns False on failure (simulation mode)."""
     global _hailo_infer_model
     if not os.path.exists(hef_path):
         log.warning("HEF not found at %s — using simulation mode", hef_path)
@@ -221,10 +220,10 @@ def _try_load_hailo(hef_path: str, log: logging.Logger) -> bool:
 
 
 def _run_hailo_inference(image_bytes: bytes, log: logging.Logger) -> list[dict]:
-    """Hailo InferVStreams API로 실제 추론 수행.
+    """Run real inference via Hailo InferVStreams API.
 
-    DocCheck YOLOv5 모델은 NMS 미통합 출력 (Sigmoid/Transpose end nodes).
-    첫 추론 시 출력 구조를 로깅하여 디버깅에 활용.
+    DocCheck YOLOv5 models output without integrated NMS (Sigmoid/Transpose end nodes).
+    Logs output structure on first inference for debugging.
     """
     from hailo_platform import InferVStreams  # type: ignore[import]
 
@@ -243,7 +242,7 @@ def _run_hailo_inference(image_bytes: bytes, log: logging.Logger) -> list[dict]:
         with m["network_group"].activate(m["network_group_params"]):
             results = pipeline.infer(input_data)
 
-    # 첫 추론 시 출력 구조 로깅
+    # Log output structure on first inference
     if not _hailo_output_logged:
         for k, v in results.items():
             try:
@@ -253,7 +252,7 @@ def _run_hailo_inference(image_bytes: bytes, log: logging.Logger) -> list[dict]:
                 log.info("HEF output key=%r err=%s", k, e)
         _hailo_output_logged = True
 
-    # ── 유연한 출력 파싱 (NMS 유무 판별) ────────────────────────────────────
+    # ── Flexible output parsing (detect whether NMS is included) ─────────────
 
     nms_tensor = None
     ragged_nms = None  # YOLOv8 ragged NMS output
@@ -275,7 +274,7 @@ def _run_hailo_inference(image_bytes: bytes, log: logging.Logger) -> list[dict]:
 
     detections = []
     num_classes = len(DEFAULT_CLASS_NAMES)
-    
+
     if ragged_nms is not None:
         # YOLOv8 ragged NMS output: list[list[ndarray]]
         # Structure: ragged_nms[batch][class_id] = array of shape [num_dets, 5]
@@ -311,13 +310,11 @@ def _run_hailo_inference(image_bytes: bytes, log: logging.Logger) -> list[dict]:
         # Regular NMS tensor (homogeneous shape)
         arr = nms_tensor[0]
         raw_dets = []
-        
+
         if arr.ndim == 3:  # [num_classes, max_boxes, 5]
             for class_id, class_dets in enumerate(arr):
-                # Background 제외 (index 0)
                 if SKIP_BACKGROUND and class_id == 0:
                     continue
-                # 유효하지 않은 클래스 제외
                 if class_id >= num_classes:
                     continue
                 for det in class_dets:
@@ -327,7 +324,6 @@ def _run_hailo_inference(image_bytes: bytes, log: logging.Logger) -> list[dict]:
                     x1, y1, x2, y2 = float(det[0]), float(det[1]), float(det[2]), float(det[3])
                     if max(x1, y1, x2, y2) <= 1.0:
                         x1, y1, x2, y2 = x1 * INPUT_SIZE, y1 * INPUT_SIZE, x2 * INPUT_SIZE, y2 * INPUT_SIZE
-                    # bbox 크기 필터링
                     bw, bh = x2 - x1, y2 - y1
                     if bw < 10 or bh < 10:
                         continue
@@ -363,18 +359,18 @@ def _run_hailo_inference(image_bytes: bytes, log: logging.Logger) -> list[dict]:
                     "confidence": round(score, 3),
                     "bbox": [round(x1, 2), round(y1, 2), round(x2, 2), round(y2, 2)],
                 })
-        
-        # 2차 NMS 적용 (Hailo 내장 NMS가 충분히 공격적이지 않을 수 있음)
+
+        # Secondary NMS (Hailo built-in NMS may not be aggressive enough)
         detections = _nms(raw_dets, max_det=15)
     else:
-        # 2) NMS가 포함되지 않은 Raw Feature Map인 경우 (DocCheck 12-class 등)
+        # Raw feature map without NMS (e.g. DocCheck 12-class)
         raw_boxes = []
         for k, v in results.items():
             arr = np.asarray(v)[0]  # remove batch
-            if arr.shape[-1] > 4: 
+            if arr.shape[-1] > 4:
                 arr = arr.reshape(-1, arr.shape[-1])
                 raw_boxes.append(arr)
-        
+
         if raw_boxes:
             merged = np.vstack(raw_boxes)
             detections = _postprocess_yolo(merged)
@@ -384,7 +380,7 @@ def _run_hailo_inference(image_bytes: bytes, log: logging.Logger) -> list[dict]:
 
 def _run_simulation_inference(image_bytes: bytes) -> list[dict]:
     """
-    하드웨어 없이 작동하는 시뮬레이션 추론 (DocCheck 960x960 기준).
+    Simulation inference (no hardware required). Based on DocCheck 960x960 dimensions.
     """
     time.sleep(0.02)
     rng = np.random.default_rng(int(time.time() * 1000) % 2**32)
@@ -405,7 +401,7 @@ def _run_simulation_inference(image_bytes: bytes) -> list[dict]:
 
 
 def _cleanup_hailo() -> None:
-    """프로세스 종료 시 Hailo 리소스 해제."""
+    """Release Hailo resources on process exit."""
     global _hailo_infer_model
     if _hailo_infer_model is not None:
         try:
@@ -416,15 +412,15 @@ def _cleanup_hailo() -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 이미지 디코딩 / YOLO 포스트프로세싱 유틸
+# Image decoding / YOLO post-processing utilities
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _decode_image(image_bytes: bytes) -> np.ndarray:
-    """바이너리 → (INPUT_SIZE, INPUT_SIZE, 3) float32 numpy 배열 변환."""
+    """Binary → (INPUT_SIZE, INPUT_SIZE, 3) float32 numpy array."""
     from PIL import Image  # type: ignore[import]
 
     img = Image.open(io.BytesIO(image_bytes)).convert("RGB").resize((INPUT_SIZE, INPUT_SIZE))
-    # Hailo HEF는 내부 정규화 포함 — [0, 255] float32 그대로 전달
+    # Hailo HEF includes internal normalization — pass [0, 255] float32 as-is
     return np.asarray(img, dtype=np.float32)
 
 
@@ -436,16 +432,16 @@ def _sigmoid(x: Any) -> Any:
 
 def _postprocess_yolo(raw: Any) -> list[dict]:
     """
-    NMS가 없는 YOLO 출력 텐서 포스트프로세싱.
-    
-    핵심: YOLOv5 raw feature map은 로짓(logit)을 출력하므로
-    반드시 sigmoid를 적용해야 확률(0~1)로 변환됩니다.
-    
-    필터링:
+    Post-process YOLO output tensors without integrated NMS.
+
+    YOLOv5 raw feature maps output logits, so sigmoid must be applied
+    to convert to probabilities (0~1).
+
+    Filtering:
       1) sigmoid(objectness) * sigmoid(class_score) >= CONF_THRESHOLD
-      2) class_id == 0 (Background) 제외
-      3) class_id >= len(DEFAULT_CLASS_NAMES) 제외 (유령 클래스 차단)
-      4) bbox 면적이 너무 작거나 큰 경우 제외
+      2) Exclude class_id == 0 (Background)
+      3) Exclude class_id >= len(DEFAULT_CLASS_NAMES) (ghost class guard)
+      4) Exclude bboxes that are too small or too large
     """
     raw = np.asarray(raw)
     if raw.ndim == 1:
@@ -455,17 +451,17 @@ def _postprocess_yolo(raw: Any) -> list[dict]:
     num_classes = len(DEFAULT_CLASS_NAMES)
     num_elements = raw.shape[-1]
     is_yolov5 = num_elements == (5 + num_classes)
-    
+
     for row in raw:
         if is_yolov5:
             # YOLOv5: [cx, cy, w, h, obj_logit, cls0_logit, cls1_logit, ...]
             obj_score = float(_sigmoid(row[4]))
             if obj_score < CONF_THRESHOLD:
                 continue
-            cls_logits = row[5:5 + num_classes]  # 14개 클래스만 추출
+            cls_logits = row[5:5 + num_classes]
             cls_probs = _sigmoid(cls_logits)
         else:
-            # YOLOv8/기타: [cx, cy, w, h, cls0, cls1, ...]
+            # YOLOv8/other: [cx, cy, w, h, cls0, cls1, ...]
             obj_score = 1.0
             cls_logits = row[4:4 + num_classes]
             if len(cls_logits) == 0:
@@ -474,21 +470,19 @@ def _postprocess_yolo(raw: Any) -> list[dict]:
 
         cls_id = int(np.argmax(cls_probs))
         confidence = min(float(cls_probs[cls_id]) * obj_score, 1.0)
-        
+
         if confidence < CONF_THRESHOLD:
             continue
 
-        # Background 클래스 (index 0) 필터링
         if SKIP_BACKGROUND and cls_id == 0:
             continue
 
-        # 유효하지 않은 클래스 ID 필터링
         if cls_id >= num_classes:
             continue
 
         cx, cy, w, h = float(row[0]), float(row[1]), float(row[2]), float(row[3])
-        
-        # 정규화 좌표(0~1) → 픽셀 좌표로 변환
+
+        # Convert normalized coords (0~1) to pixel coords
         if cx <= 1.0 and cy <= 1.0 and w <= 1.0 and h <= 1.0:
             cx *= INPUT_SIZE
             cy *= INPUT_SIZE
@@ -498,12 +492,11 @@ def _postprocess_yolo(raw: Any) -> list[dict]:
         x1, y1 = cx - w / 2, cy - h / 2
         x2, y2 = cx + w / 2, cy + h / 2
 
-        # bbox 면적 유효성 검사 (너무 작거나 음수 면적 제거)
         box_w = x2 - x1
         box_h = y2 - y1
-        if box_w < 5 or box_h < 5:  # 최소 5px
+        if box_w < 5 or box_h < 5:  # minimum 5px
             continue
-        if box_w > INPUT_SIZE * 0.95 or box_h > INPUT_SIZE * 0.95:  # 화면 거의 전체
+        if box_w > INPUT_SIZE * 0.95 or box_h > INPUT_SIZE * 0.95:  # near-full-frame
             continue
 
         cls_name = DEFAULT_CLASS_NAMES[cls_id]
@@ -518,7 +511,7 @@ def _postprocess_yolo(raw: Any) -> list[dict]:
 
 
 def _nms(detections: list[dict], max_det: int = 15) -> list[dict]:
-    """단순 NMS: IoU 기반 중복 제거 + 최대 탐지 수 제한."""
+    """Simple NMS: IoU-based deduplication with max detection cap."""
     if not detections:
         return []
     detections.sort(key=lambda d: d["confidence"], reverse=True)

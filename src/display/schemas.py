@@ -1,5 +1,5 @@
 """
-schemas.py — Display Agent API 입출력 스키마
+schemas.py — Display Agent API schemas
 """
 
 from __future__ import annotations
@@ -11,24 +11,24 @@ from pydantic import BaseModel, Field
 
 
 class BorderColor(str, Enum):
-    GREEN = "green"      # 정상: 트레이 완성, 시스템 이상 없음
-    YELLOW = "yellow"    # 경고: 불확실, 확인 필요
-    RED = "red"          # 위험: 기기 누락, NPU 과열 등 크리티컬
+    GREEN = "green"   # match confirmed, no issues
+    YELLOW = "yellow" # standby / uncertain
+    RED = "red"       # mismatch / critical error
 
 
 class Detection(BaseModel):
-    """단일 탐지 결과 (화면 오버레이용)"""
     class_name: str
     confidence: float = Field(ge=0.0, le=1.0)
-    bbox: list[float] = Field(min_length=4, max_length=4)  # [x1,y1,x2,y2] 640×640 기준
-    keypoints: Optional[list[list[float]]] = Field(None, description="[x, y] 640x640 기준")
+    bbox: list[float] = Field(min_length=4, max_length=4)  # [x1,y1,x2,y2] in 640x640 space
+    keypoints: Optional[list[list[float]]] = Field(None, description="[x, y] in 640x640 space")
 
 
 class AIStatus(BaseModel):
     inference_ready: bool = True
     fps: float = 0.0
     npu_temp_celsius: Optional[float] = None
-    thermal_status: str = "normal"         # normal / warning / critical
+    cpu_temp_celsius: Optional[float] = None
+    thermal_status: str = "normal"  # normal / warning / critical
 
 
 class NetworkStatus(BaseModel):
@@ -40,26 +40,26 @@ class NetworkStatus(BaseModel):
 class TrayItem(BaseModel):
     class_name: str
     count: int = Field(ge=0)
-    device_name: Optional[str] = None    # FDA 표준 기기명 (device_master 연동 시)
-    product_code: Optional[str] = None   # FDA 제품 코드 (e.g. "GZY")
-    fda_class: Optional[str] = None      # FDA 등급 (e.g. "I", "II")
+    device_name: Optional[str] = None
+    product_code: Optional[str] = None
+    fda_class: Optional[str] = None
 
 
 class FrameUpdate(BaseModel):
-    """POST /frame — 카메라 프레임 갱신 (base64 인코딩)"""
-    image_b64: str = Field(..., description="JPEG 이미지 base64 문자열")
+    """POST /frame — camera frame update (base64 encoded)"""
+    image_b64: str = Field(..., description="JPEG image as base64 string")
     detections: list[Detection] = Field(default_factory=list)
 
 
 class ScanInfo(BaseModel):
-    """바코드 스캔 시 기록되는 작업 메타데이터 (DATA INFO 패널용)"""
+    """Job metadata recorded at QR scan time (DATA INFO panel)"""
     job_id: str
-    scanned_at: str                          # "HH:MM:SS" 형식
+    scanned_at: str  # "HH:MM:SS" format
     target: dict[str, int] = Field(default_factory=dict)
 
 
 class HUDUpdate(BaseModel):
-    """POST /hud — HUD 데이터 부분 갱신 (None 필드는 유지)"""
+    """POST /hud — partial HUD update (None fields are preserved)"""
     ai_status: Optional[AIStatus] = None
     network_status: Optional[NetworkStatus] = None
     tray_items: Optional[list[TrayItem]] = None

@@ -28,18 +28,56 @@
 
         /* Glassmorphism Enhancements */
         .glass-card {
-            background: rgba(28, 28, 30, 0.4);
+            background: rgba(32, 32, 35, 0.4);
             backdrop-filter: blur(24px);
             -webkit-backdrop-filter: blur(24px);
             border: 1px solid rgba(255, 255, 255, 0.08);
             box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s ease, border-color 0.3s ease;
         }
 
         .glass-card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.4);
-            border: 1px solid rgba(255, 255, 255, 0.12);
+            transform: translateY(-4px);
+            box-shadow: 0 20px 40px 0 rgba(0, 0, 0, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+        }
+
+        .comparison-line {
+            position: relative;
+        }
+
+        .comparison-line::before {
+            content: '';
+            position: absolute;
+            left: -12px;
+            top: 50%;
+            width: 4px;
+            height: 4px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateY(-50%);
+        }
+
+        /* Status Colors */
+        .status-pill {
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+
+        .status-match {
+            background: rgba(52, 199, 89, 0.15);
+            color: #34c759;
+            border: 1px solid rgba(52, 199, 89, 0.2);
+        }
+
+        .status-mismatch {
+            background: rgba(255, 59, 48, 0.15);
+            color: #ff3b30;
+            border: 1px solid rgba(255, 59, 48, 0.2);
         }
 
         /* Scrollbar for feeds */

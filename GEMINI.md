@@ -40,6 +40,7 @@ CLAUDE.md와 GEMINI.md는 AI 어시스턴트(Claude, Gemini) 간의 컨텍스트
 | Camera Agent | `camera_agent` | `172.20.0.12` | `8002` | ❌ 내부 전용 | 4K 카메라 프레임 캡처 |
 | Module C (Display) | `display_agent` | `172.20.0.13` | `8003` | ❌ 내부 전용 | HDMI HUD 출력 (더블 버퍼 렌더링) |
 | Module D (Storage) | `firebase_sync_agent` | `172.20.0.14` | `8004` | ❌ 내부 전용 | 비동기 Firestore/Storage 동기화 |
+| Device Master | `device_master_agent` | `172.20.0.15` | `8005` | ❌ 내부 전용 | FDA 표준 명칭 매핑 및 MDM 연동 |
 
 ---
 
@@ -85,6 +86,11 @@ docker-compose up -d --build
 비동기로 데이터를 영속화.
 - **Firestore**: 검수 이력 기록.
 - **Storage**: 에러(ERROR 상태 5초 지속) 발생 시점 기준 0.5초 후 0.1초 간격 3장 원본 스냅샷 캡처 및 업로드.
+
+### 🔍 Device Master Agent (The "Encyclopedia")
+YOLO 레이블을 표준 제품명으로 변환.
+- **FDA Mapping**: `forceps` → `Tissue Forceps, Ring (FDA Class I)`
+- **MDM Bridge**: 고객사 내부 제품 코드 매핑을 위한 확장성 제공.
 
 ---
 
@@ -301,3 +307,4 @@ docker compose up -d <service_name>
 10. **`docker cp` 후에도 구버전 실행**: RPi의 `~/SurgicalAI01/src/` 파일이 Mac과 별도로 관리됨. `docker cp ~/SurgicalAI01/src/...`는 RPi 로컬 파일을 복사하므로 Mac에서 수정한 내용이 반영 안 됨. 반드시 Mac → RPi SCP 후 docker cp 실행할 것.
 11. **camera_agent 포트 외부 접근 불가 (HTTP 000)**: `camera_agent:8002`는 Docker 내부 네트워크에만 노출 (`expose`). 호스트에서 `curl localhost:8002`는 실패가 정상. 내부 테스트는 `docker exec gateway_agent curl http://camera_agent:8002/frame` 사용.
 12. **카메라 재연결 후 camera_agent 인식 실패**: USB 카메라 재연결 시 `docker restart camera_agent` 필요. OpenCV VideoCapture는 시작 시점에 디바이스를 열므로 재시작 없이는 새 연결을 인식하지 못함.
+13. **HDMI overlay silent death (service healthy, screen blank)**: `_render_loop()` had zero exception handling — a single numpy/OpenCV error during HUD rendering would silently kill the daemon thread. FastAPI `/health` kept responding normally, making it undetectable via container status alone. Fixed by adding try/except with consecutive error counter in `display/main.py`, and canvas bounds clamping in `display/hud.py` (`_panel_bg`, `_draw_status_text`).

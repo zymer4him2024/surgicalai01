@@ -256,8 +256,13 @@ URL: **https://surgicalai01.web.app**
 
 ## 다음 단계 (TODO)
 
-- [ ] Main Controller에 실제 QR 코드 파싱 (pyzbar / zxing) 연동
-- [ ] Inference Agent에 `POST /predict` → `POST /inference` 경로 변경 완전 적용 (YOLOv11 HEF 준비)
-- [ ] Firebase 자격증명 설정 후 실제 Firestore/Storage 업로드 검증
-- [ ] Firestore Security Rules 설정 (읽기 전용 공개 + 쓰기는 서비스 계정 전용)
-- [ ] RPi 5 실제 하드웨어 배포 및 Hailo-8 드라이버 연동
+- [x] Main Controller에 실제 QR 코드 파싱 (pyzbar / zxing) 연동
+- [x] Inference Agent에 YOLOv11 HEF 연동 및 실기기 검증
+- [x] Firebase 자격증명 설정 후 실제 Firestore/Storage 업로드 검증
+- [x] RPi 5 실제 하드웨어 배포 및 Hailo-8 드라이버 연동
+- [x] Preset Cycle 및 자동 전환 로직 구현
+- [x] QR 스캔 성공 배너 (Flash HUD) 구현
+- [x] 1-Click Launcher (Desktop Entry) 생성
+- [x] Admin/Company 대시보드 UI 현대화 (Apple-style Glassmorphism)
+- [ ] SurgeoNet (Pose) 모델 최종 최적화 및 현장 테스트
+- [ ] Firestore Security Rules 세분화 (Admin vs User)

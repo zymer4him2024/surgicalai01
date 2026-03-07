@@ -1,9 +1,9 @@
 """
-monitor.py — NPU 온도 모니터링 스레드
+monitor.py — NPU temperature monitoring thread
 
-Hailo-8 온도 읽기:
-  1. sysfs        /sys/class/hailo_chardev/hailo0/device_temperature
-  2. 읽기 실패 시  None 반환 (시뮬레이션 모드)
+Reads Hailo-8 temperature via sysfs:
+  /sys/class/hailo_chardev/hailo0/device_temperature
+Returns None in simulation mode (file not found).
 """
 
 from __future__ import annotations
@@ -17,11 +17,10 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 _SYSFS_TEMP_PATH = "/sys/class/hailo_chardev/hailo0/device_temperature"
-_POLL_INTERVAL = 5.0  # 초
+_POLL_INTERVAL = 5.0
 
 
 class NPUTemperatureMonitor:
-    """백그라운드 스레드로 NPU 온도를 주기적으로 폴링하는 모니터."""
 
     def __init__(
         self,
@@ -39,8 +38,6 @@ class NPUTemperatureMonitor:
         self._thread = threading.Thread(
             target=self._poll_loop, name="npu-temp-monitor", daemon=True
         )
-
-    # ── 공개 API ──────────────────────────────────────────────────────────────
 
     def start(self) -> None:
         self._thread.start()
@@ -84,8 +81,6 @@ class NPUTemperatureMonitor:
             )
         return None
 
-    # ── 내부 구현 ─────────────────────────────────────────────────────────────
-
     def _poll_loop(self) -> None:
         while not self._stop_event.is_set():
             temp = self._read_temperature()
@@ -96,7 +91,6 @@ class NPUTemperatureMonitor:
             self._stop_event.wait(timeout=self.poll_interval)
 
     def _read_temperature(self) -> Optional[float]:
-        """온도 읽기: sysfs에서 직접 온도 읽기 시도."""
         return self._read_via_sysfs()
 
     @staticmethod
@@ -104,7 +98,6 @@ class NPUTemperatureMonitor:
         try:
             with open(_SYSFS_TEMP_PATH) as f:
                 raw = f.read().strip()
-            # 값이 밀리℃ 단위일 경우 변환
             value = float(raw)
             return value / 1000.0 if value > 1000 else value
         except (FileNotFoundError, ValueError, OSError):

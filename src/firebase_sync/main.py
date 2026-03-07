@@ -1,27 +1,24 @@
 """
 main.py — Firebase Cloud Sync Agent (Port 8004)
 
-아키텍처:
-  ┌─────────────────────────────────────────────────────────────────┐
-  │  FastAPI Thread (메인)                                           │
-  │  ├─ POST /sync         → 이벤트 큐에 삽입 (즉시 202 반환)       │
-  │  ├─ GET  /queue/status → 큐 깊이, Firebase 도달 가능 여부       │
-  │  ├─ GET  /queue/item/{id} → 개별 항목 상태 (doc_id 포함)        │
-  │  ├─ POST /queue/flush  → 수동 즉시 처리 트리거                  │
-  │  └─ GET  /health       → 모듈 상태                              │
-  └─────────────────────────────────────────────────────────────────┘
-  ┌─────────────────────────────────────────────────────────────────┐
-  │  Queue Worker Thread (백그라운드)                                │
-  │  ├─ 5초 주기로 큐 폴링                                          │
-  │  ├─ 스냅샷 3장 캡처 (0.1초 간격, 노출 보정)                     │
-  │  ├─ Firebase Storage 업로드                                     │
-  │  ├─ Firestore 문서 생성                                         │
-  │  └─ 실패 시 지수 백오프 재시도 (최대 10회)                      │
-  └─────────────────────────────────────────────────────────────────┘
+Architecture:
+  FastAPI Thread (main)
+  ├─ POST /sync         → insert event to queue (immediate 202 return)
+  ├─ GET  /queue/status → queue depth, Firebase reachability
+  ├─ GET  /queue/item/{id} → individual item status (doc_id included)
+  ├─ POST /queue/flush  → manual immediate processing trigger
+  └─ GET  /health       → module status
 
-보안:
-  - 모든 Firebase 자격증명은 .env / Docker secrets 경유
-  - 코드에 API Key / 서비스 계정 정보 절대 하드코딩 금지
+  Queue Worker Thread (background)
+  ├─ polls queue every 5s
+  ├─ captures 3 snapshots (0.1s interval, exposure bracketed)
+  ├─ uploads to Firebase Storage
+  ├─ creates Firestore document
+  └─ exponential backoff retry on failure (max 10 retries)
+
+Security:
+  - All Firebase credentials via .env / Docker secrets
+  - No API keys or service account info hardcoded
 """
 
 from __future__ import annotations
@@ -53,10 +50,10 @@ from src.firebase_sync.snapshot import capture_snapshots
 from src.firebase_sync.uploader import BaseUploader, create_uploader
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 설정 (.env 로드 → 환경변수 우선)
+# Config
 # ─────────────────────────────────────────────────────────────────────────────
 
-load_dotenv()   # .env에서 환경변수 로드 (이미 설정된 변수는 덮어쓰지 않음)
+load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -71,23 +68,22 @@ DISPLAY_URL = os.getenv("DISPLAY_URL", "http://display_agent:8003")
 GATEWAY_URL = os.getenv("GATEWAY_URL", "http://gateway_agent:8000")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 전역 인스턴스
+# Global instances
 # ─────────────────────────────────────────────────────────────────────────────
 
 _queue: QueueManager
 _uploader: BaseUploader
 _http_client: httpx.AsyncClient
-_flush_event = threading.Event()   # /queue/flush로 즉시 처리 트리거
-_last_control_ts: float = 0.0     # 마지막으로 처리한 device_control 명령 타임스탬프
-_last_job_config_ts: float = 0.0  # 마지막으로 처리한 job_config 타임스탬프
+_flush_event = threading.Event()
+_last_control_ts: float = 0.0
+_last_job_config_ts: float = 0.0
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 큐 워커 스레드
+# Queue worker thread
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _worker_loop() -> None:
-    """백그라운드 큐 워커 (별도 스레드, 자체 이벤트 루프)."""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     logger.info("Queue worker started (poll=%.1fs)", WORKER_POLL_SEC)
@@ -99,7 +95,6 @@ def _worker_loop() -> None:
 
 
 def _control_loop() -> None:
-    """device_control 폴링 전용 스레드 — 큐 백로그에 관계없이 5초 주기 실행."""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     logger.info("Control loop started (poll=%.1fs)", WORKER_POLL_SEC)
@@ -112,8 +107,7 @@ def _control_loop() -> None:
 
 
 async def _process_device_control() -> None:
-    """Firestore device_control/rpi 문서를 폴링하여 Gateway에 명령 릴레이.
-    Firebase 자격증명 없는 시뮬레이션 모드에서는 건너뜀."""
+    """Poll Firestore device_control/rpi and relay commands to Gateway. Skipped in simulation mode."""
     global _last_control_ts
     if _uploader.simulation_mode:
         return
@@ -136,8 +130,7 @@ async def _process_device_control() -> None:
         if ts_seconds <= _last_control_ts:
             return
         _last_control_ts = ts_seconds
-        
-        # Handle legacy command string or new boolean toggles
+
         if "command" in data and "inference_running" not in data:
             payload = {"inference_running": data["command"] == "start"}
         else:
@@ -146,7 +139,7 @@ async def _process_device_control() -> None:
                 "camera_active": data.get("camera_active", True),
                 "display_active": data.get("display_active", True)
             }
-            
+
         async with httpx.AsyncClient(timeout=3.0) as http:
             resp = await http.post(f"{GATEWAY_URL}/control", json=payload)
             logger.info(
@@ -158,8 +151,7 @@ async def _process_device_control() -> None:
 
 
 async def _process_job_config() -> None:
-    """Firestore job_config/rpi를 폴링하여 Gateway에 첫 번째 Set Job 릴레이.
-    sets[] + cursor 형식 지원."""
+    """Poll Firestore job_config/rpi and relay first Set job to Gateway. Supports sets[] + cursor format."""
     global _last_job_config_ts
     if _uploader.simulation_mode:
         return
@@ -210,7 +202,7 @@ async def _process_job_config() -> None:
 
 
 async def _do_advance_set() -> None:
-    """Firestore job_config/rpi 커서를 +1 하고 다음 Set을 Gateway에 전송."""
+    """Increment Firestore job_config/rpi cursor by 1 and send next Set to Gateway."""
     if _uploader.simulation_mode:
         return
     db = getattr(_uploader, "_db", None)
@@ -260,7 +252,7 @@ async def _do_advance_set() -> None:
 
 
 async def _update_system_status() -> None:
-    """Gateway 상태를 Firestore system_status/rpi에 주기적으로 동기화."""
+    """Periodically sync Gateway status to Firestore system_status/rpi."""
     if _uploader.simulation_mode:
         return
     db = getattr(_uploader, "_db", None)
@@ -291,7 +283,6 @@ async def _update_system_status() -> None:
 
 
 async def _process_queue() -> None:
-    """큐에서 ready 항목 꺼내 업로드 처리."""
     items = _queue.dequeue_ready()
     if not items:
         return
@@ -300,12 +291,10 @@ async def _process_queue() -> None:
         for item in items:
             logger.info("Processing queue item #%d (%s)", item.id, item.event_type)
             try:
-                # 스냅샷 캡처: MISMATCH / ALERT 이벤트만
                 shots: list[dict] = []
                 if item.event_type in ("mismatch", "alert"):
                     shots = await capture_snapshots(client)
 
-                # Firebase 업로드
                 doc_id, storage_urls = await _uploader.upload_event(
                     item.payload, shots
                 )
@@ -331,7 +320,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     _uploader = create_uploader()
     _http_client = httpx.AsyncClient(timeout=10.0)
 
-    # 워커 스레드 시작
     worker_thread = threading.Thread(
         target=_worker_loop, name="queue-worker", daemon=True
     )
@@ -353,36 +341,31 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FastAPI 앱
+# FastAPI app
 # ─────────────────────────────────────────────────────────────────────────────
 
 app = FastAPI(
     title="Firebase Sync Agent API",
-    description="오프라인 내성 큐 + Firebase 클라우드 동기화",
+    description="Offline-resilient queue + Firebase cloud sync",
     version="1.0.0",
     lifespan=lifespan,
 )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 엔드포인트
+# Endpoints
 # ─────────────────────────────────────────────────────────────────────────────
 
 @app.post(
     "/sync",
     response_model=SyncResponse,
     status_code=status.HTTP_202_ACCEPTED,
-    summary="동기화 이벤트 큐에 삽입",
-    description=(
-        "탐지 불일치·경고 이벤트를 로컬 큐에 즉시 삽입합니다.\n\n"
-        "네트워크가 끊겨도 데이터는 SQLite에 안전하게 보관되며 "
-        "연결 복구 시 자동 재전송됩니다."
-    ),
+    summary="Insert sync event into queue",
 )
 async def sync_event(body: SyncRequest) -> SyncResponse:
     payload = body.model_dump()
     event_id = _queue.enqueue(body.event_type.value, payload)
-    _flush_event.set()   # 워커 즉시 깨우기
+    _flush_event.set()
 
     return SyncResponse(
         event_id=event_id,
@@ -391,11 +374,7 @@ async def sync_event(body: SyncRequest) -> SyncResponse:
     )
 
 
-@app.get(
-    "/queue/status",
-    response_model=QueueStatusResponse,
-    summary="큐 상태 조회",
-)
+@app.get("/queue/status", response_model=QueueStatusResponse, summary="Queue status")
 async def queue_status() -> QueueStatusResponse:
     counts = _queue.counts()
     reachable = await _uploader.is_reachable()
@@ -412,8 +391,7 @@ async def queue_status() -> QueueStatusResponse:
 @app.get(
     "/queue/item/{event_id}",
     response_model=QueueItemDetail,
-    summary="개별 큐 항목 상태 조회",
-    description="event_id로 항목을 조회합니다. `status=done`이면 `firestore_doc_id`가 채워집니다.",
+    summary="Individual queue item status",
 )
 async def queue_item(event_id: int) -> QueueItemDetail:
     item = _queue.get_item(event_id)
@@ -438,7 +416,7 @@ async def queue_item(event_id: int) -> QueueItemDetail:
 @app.post(
     "/log_round",
     status_code=status.HTTP_202_ACCEPTED,
-    summary="검수 라운드 Firestore 기록 (5슬롯 순환 버퍼)",
+    summary="Log inspection round to Firestore (5-slot circular buffer)",
 )
 async def log_round(body: dict) -> JSONResponse:
     asyncio.create_task(_write_inspection_round(body))
@@ -446,7 +424,6 @@ async def log_round(body: dict) -> JSONResponse:
 
 
 async def _write_inspection_round(round_data: dict) -> None:
-    """Firestore inspection_log/rpi 문서에 5슬롯 순환 버퍼로 기록."""
     if _uploader.simulation_mode:
         return
     db = getattr(_uploader, "_db", None)
@@ -467,7 +444,6 @@ async def _write_inspection_round(round_data: dict) -> None:
             else:
                 slots = [None] * 5
                 cursor = 0
-            # Ensure list is exactly 5 elements
             while len(slots) < 5:
                 slots.append(None)
 
@@ -491,7 +467,7 @@ async def _write_inspection_round(round_data: dict) -> None:
 @app.post(
     "/advance_set",
     status_code=status.HTTP_202_ACCEPTED,
-    summary="다음 프리셋 셋으로 커서 전진 및 Gateway에 새 Job 전송",
+    summary="Advance cursor to next preset set and send new job to Gateway",
 )
 async def advance_set() -> JSONResponse:
     asyncio.create_task(_do_advance_set())
@@ -501,11 +477,7 @@ async def advance_set() -> JSONResponse:
 @app.post(
     "/snap",
     status_code=status.HTTP_202_ACCEPTED,
-    summary="ERROR 상태 스냅샷 즉시 촬영 트리거",
-    description=(
-        "Gateway가 5초 불일치(ERROR 상태) 감지 시 호출합니다.\n"
-        "스냅샷 3장을 즉시 캡처하여 Firebase에 업로드합니다."
-    ),
+    summary="Trigger immediate ERROR state snapshot capture",
 )
 async def trigger_snap(body: dict) -> JSONResponse:
     job_id = body.get("job_id", "unknown")
@@ -522,26 +494,18 @@ async def trigger_snap(body: dict) -> JSONResponse:
         "metadata": metadata,
     }
     event_id = _queue.enqueue("mismatch", payload)
-    _flush_event.set()   # 워커 즉시 깨우기
+    _flush_event.set()
     logger.info("Snap triggered — job_id=%s, reason=%s, event_id=%d", job_id, reason, event_id)
     return JSONResponse({"event_id": event_id, "status": "queued", "job_id": job_id})
 
 
-@app.post(
-    "/queue/flush",
-    summary="큐 즉시 처리 트리거",
-    description="대기 중인 큐 항목을 즉시 처리합니다 (폴링 주기 무시).",
-)
+@app.post("/queue/flush", summary="Trigger immediate queue processing")
 async def flush_queue() -> JSONResponse:
     _flush_event.set()
     return JSONResponse({"status": "flush triggered"})
 
 
-@app.get(
-    "/health",
-    response_model=HealthResponse,
-    summary="헬스 체크",
-)
+@app.get("/health", response_model=HealthResponse, summary="Health check")
 async def health_check() -> HealthResponse:
     counts = _queue.counts()
     pending = counts.get("pending", 0) + counts.get("processing", 0)
@@ -557,7 +521,7 @@ async def health_check() -> HealthResponse:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 엔트리포인트
+# Entry point
 # ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

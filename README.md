@@ -61,9 +61,28 @@ HDMI로 출력되는 실시간 모니터링 화면을 렌더링합니다.
 
 현재 Firebase Hosting (`https://surgicalai01.web.app`)을 통해 Apple-style의 Vanilla HTML/CSS/JS 대시보드가 배포되어 가동 중입니다.
 
+| 항목 | 설명 |
+|---|---|
+| Module B (Gateway) | `gateway_agent` | QR/Job 연동, 상태 머신 (READY->MATCH->ERROR), 5초 지연 트리거 완료 |
+| Module A (Inference) | `inference_agent` | RPi5 + Hailo-8 실기기 가동 완료 (mode=hailo) |
+| Firebase Pipeline | `firebase_sync` | 에러 시 스냅샷 트리거 및 Async Storage 업로드 완료 |
+| HDMI Display (Module C) | `display_agent` | HDMI 출력 및 ASCII HUD 오버레이 연동 완료 (xhost 권한 해결) |
+| Autonomous System | **Internal Logic** | Gateway 기반 자율 카운팅 루프 (Pull-based) 구현 완료 |
+| UI/UX Polish | **Favicon/HUD** | SVG Favicon 적용 및 HUD ASCII 문자 대체 완료 |
+| SurgeoNet Prep | **Model/Labels** | 14개 수술 도구 라벨 맵핑 및 Device Master 메타데이터 동기화 완료 |
+| Preset Cycle | **Admin Dashboard** | 5개 랜덤 프리셋 세트 자동 순환 (Set 1→2→3→4→5→1). Firestore `job_config/rpi`에 `sets[]` + `cursor` 저장. MATCH/ERROR 후 5초 뒤 다음 세트로 자동 전환. |
+| QR Flash Indicator | **Display HUD** | QR 스캔 성공 시 하단 중앙에 "QR SCANNED" 배너 3초 표시. `flash_text` 필드가 `/hud` 엔드포인트에 추가됨. |
+| QR Trigger | **Gateway** | `/job` 엔드포인트는 `_pending_preset`에 저장. QR 스캔 시 `_pending_preset → current_job` 전환하여 detection 시작. |
+| One-click Launcher | **RPi Desktop** | `~/Desktop/SurgicalAI.desktop` 더블클릭으로 `xhost +local:` 및 `docker compose up -d` 자동 실행. |
+
+## 4. Admin & Company Dashboard 기능 정의
+
+현재 Firebase Hosting (`https://surgicalai01.web.app`)을 통해 Apple-style의 Vanilla HTML/CSS/JS 대시보드가 배포되어 가동 중입니다.
+
 ### 👤 Admin Dashboard (관리자용)
 * **전체 공정 모니터링**: Firestore의 `sync_events` 기반 검수 이력 리스트 실시간 확인.
 * **에러 분석 보드**: Red 상태(mismatch/alert)로 종료된 작업의 스냅샷 3장 모달 연동. AI 오판 및 실제 작업자 실수 판별용 뷰어.
+* **Preset Control**: 수술 도구 세트 프리셋 구성 및 자동 순환 제어.
 
 ### 🏢 Company Dashboard (고객사용/Viewer)
 * **검수 이력 통계**: 당일 기준 총 검수 수량 및 성공률 (Success Rate) 실시간 집계.

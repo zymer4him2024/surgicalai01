@@ -1,13 +1,13 @@
 """
-queue_manager.py — SQLite 기반 영속 큐
+queue_manager.py — SQLite-backed persistent queue
 
-특징:
-  - 컨테이너 재시작·크래시에서도 데이터 유실 없음
-  - 지수 백오프 재시도: 10s → 20s → 40s → … (최대 10회)
-  - WAL 모드로 읽기/쓰기 동시성 지원
-  - 처리 완료 항목은 보존 (audit trail)
+Features:
+  - No data loss on container restart or crash
+  - Exponential backoff retry: 10s → 20s → 40s → ... (max 10 retries)
+  - WAL mode for concurrent read/write
+  - Completed items retained for audit trail
 
-스키마:
+Schema:
   sync_queue(id, event_type, payload, retry_count,
              next_retry_at, created_at, status,
              firestore_doc_id, storage_urls, error_message)
@@ -33,9 +33,9 @@ class QueueItem:
     event_type: str
     payload: dict
     retry_count: int
-    next_retry_at: float       # Unix timestamp
+    next_retry_at: float
     created_at: float
-    status: str                # pending / processing / done / failed
+    status: str  # pending / processing / done / failed
     firestore_doc_id: Optional[str]
     storage_urls: list[str]
     error_message: Optional[str]
@@ -43,18 +43,16 @@ class QueueItem:
 
 class QueueManager:
     """
-    SQLite 기반 영속 로컬 큐.
-    삽입: API 스레드
-    소비: 백그라운드 워커 스레드
-    → threading.Lock으로 동시 쓰기 직렬화
+    SQLite-backed persistent local queue.
+    Inserts: API thread
+    Consumption: background worker thread
+    Concurrent writes serialized via threading.Lock
     """
 
     def __init__(self, db_path: str = DB_PATH_DEFAULT) -> None:
         self.db_path = db_path
         self._lock = threading.Lock()
         self._init_db()
-
-    # ── DB 초기화 ─────────────────────────────────────────────────────────────
 
     def _init_db(self) -> None:
         with self._connect() as conn:
@@ -78,10 +76,7 @@ class QueueManager:
             )
             conn.commit()
 
-    # ── 공개 API ──────────────────────────────────────────────────────────────
-
     def enqueue(self, event_type: str, payload: dict) -> int:
-        """새 이벤트를 큐에 삽입. 삽입된 row id 반환."""
         now = time.time()
         with self._lock, self._connect() as conn:
             cursor = conn.execute(
@@ -94,7 +89,6 @@ class QueueManager:
             return cursor.lastrowid  # type: ignore[return-value]
 
     def dequeue_ready(self) -> list[QueueItem]:
-        """next_retry_at이 현재 이전인 pending 항목 목록 반환 (최대 5개)."""
         now = time.time()
         with self._lock, self._connect() as conn:
             rows = conn.execute(
@@ -103,7 +97,6 @@ class QueueManager:
                    ORDER BY created_at ASC LIMIT 5""",
                 (now,),
             ).fetchall()
-            # 꺼낸 항목을 processing으로 마킹
             ids = [r["id"] for r in rows]
             if ids:
                 placeholders = ",".join("?" * len(ids))
@@ -168,8 +161,6 @@ class QueueManager:
                 "SELECT status, COUNT(*) as cnt FROM sync_queue GROUP BY status"
             ).fetchall()
         return {r["status"]: r["cnt"] for r in rows}
-
-    # ── 내부 헬퍼 ─────────────────────────────────────────────────────────────
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, check_same_thread=False)

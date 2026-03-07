@@ -1,11 +1,11 @@
 """
-main.py — Camera Agent (Module: CameraAgent)
+main.py — Camera Agent
 
-USB 카메라 프레임 캡처 담당.
+Handles USB camera frame capture.
 
-엔드포인트:
-  GET /health  — 카메라 상태 반환
-  GET /frame   — 최신 JPEG 프레임 반환 (image/jpeg)
+Endpoints:
+  GET /health  — camera status
+  GET /frame   — latest JPEG frame (image/jpeg)
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ logging.basicConfig(
 logger = logging.getLogger("camera.main")
 
 CAMERA_INDEX = int(os.getenv("CAMERA_INDEX", "0"))
-CAMERA_WIDTH = int(os.getenv("CAMERA_WIDTH", "3840"))   # 4K — 카메라가 지원하는 최대값으로 자동 조정
+CAMERA_WIDTH = int(os.getenv("CAMERA_WIDTH", "3840"))
 CAMERA_HEIGHT = int(os.getenv("CAMERA_HEIGHT", "2160"))
 CAMERA_FPS = int(os.getenv("CAMERA_FPS", "30"))
 MODULE_NAME = os.getenv("MODULE_NAME", "CameraAgent")
@@ -40,13 +40,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     global _cap
     _cap = cv2.VideoCapture(CAMERA_INDEX, cv2.CAP_V4L2)
     if _cap.isOpened():
-        # 최대 해상도 요청 (카메라가 지원하는 최대값으로 자동 조정됨)
         _cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_WIDTH)
         _cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
         _cap.set(cv2.CAP_PROP_FPS, CAMERA_FPS)
-        # 항상 가장 최신 프레임 반환 (버퍼 1장)
         _cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        # 자동 초점 활성화
         _cap.set(cv2.CAP_PROP_AUTOFOCUS, 1)
 
         actual_w = int(_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -81,7 +78,7 @@ def health_check():
     }
 
 
-@app.get("/frame", summary="최신 카메라 프레임 반환 (JPEG)")
+@app.get("/frame", summary="Latest camera frame (JPEG)")
 def get_frame() -> Response:
     if _cap is None or not _cap.isOpened():
         raise HTTPException(
@@ -94,7 +91,6 @@ def get_frame() -> Response:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Failed to capture frame",
         )
-    # 고품질 JPEG 인코딩 (추론 정확도 향상)
     _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
     return Response(content=buf.tobytes(), media_type="image/jpeg")
 

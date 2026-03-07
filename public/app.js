@@ -98,54 +98,64 @@ function renderTimeline(slots) {
 
     timelineFeed.innerHTML = valid.map(slot => {
         const isMatch = slot.result === 'YES MATCH';
-        const dotColor = isMatch
-            ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]'
-            : 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]';
-        const badge = isMatch
-            ? '<span class="text-xs font-semibold text-green-400 bg-green-500/10 px-2 py-0.5 rounded-md">MATCH</span>'
-            : '<span class="text-xs font-semibold text-red-400 bg-red-500/10 px-2 py-0.5 rounded-md">MISMATCH</span>';
+        const statusClass = isMatch ? 'status-match' : 'status-mismatch';
+        const statusLabel = isMatch ? 'MATCH' : 'MISMATCH';
 
         const target = slot.target || {};
         const detected = slot.detected || {};
+
         const targetRows = Object.entries(target)
             .filter(([, v]) => v > 0)
             .map(([k, v]) => `
-                <div class="flex justify-between text-xs py-0.5">
-                    <span class="text-gray-400 truncate">${k}</span>
-                    <span class="text-white ml-2 shrink-0">× ${v}</span>
+                <div class="flex justify-between items-center text-[11px] py-1 border-b border-white/5 last:border-0">
+                    <span class="text-appleMuted font-medium truncate">${k}</span>
+                    <span class="text-white font-mono ml-2 shrink-0">×${v}</span>
                 </div>`).join('');
-        const detectedRows = Object.entries(detected)
-            .map(([k, v]) => {
-                const expected = target[k] || 0;
-                const ok = v === expected && expected > 0;
-                const color = ok ? 'text-green-400' : 'text-red-400';
+
+        const detectedRows = Object.entries(target)
+            .filter(([, v]) => v > 0) // Show all fields that were expected
+            .map(([k, targetVal]) => {
+                const detectedVal = detected[k] || 0;
+                const ok = detectedVal === targetVal;
+                const colorClass = ok ? 'text-green-400' : 'text-red-400 font-bold';
                 return `
-                <div class="flex justify-between text-xs py-0.5">
-                    <span class="text-gray-400 truncate">${k}</span>
-                    <span class="${color} ml-2 shrink-0">× ${v}</span>
+                <div class="flex justify-between items-center text-[11px] py-1 border-b border-white/5 last:border-0">
+                    <span class="text-appleMuted font-medium truncate">${k}</span>
+                    <span class="${colorClass} font-mono ml-2 shrink-0">×${detectedVal}</span>
                 </div>`;
             }).join('');
 
         return `
-            <div class="p-3 bg-white/5 rounded-xl border border-white/5 hover:bg-white/8 transition-colors animate-fade-in">
-                <div class="flex items-center justify-between mb-2">
-                    <div class="flex items-center gap-2 min-w-0">
-                        <div class="w-2 h-2 rounded-full shrink-0 ${dotColor}"></div>
-                        <span class="text-sm font-medium text-white truncate">${slot.job_id}</span>
+            <div class="p-5 glass-card rounded-2xl animate-fade-in group">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="flex flex-col min-w-0">
+                        <span class="text-[10px] uppercase tracking-widest text-appleMuted font-bold mb-0.5">Operation ID</span>
+                        <span class="text-sm font-semibold text-white truncate px-1">${slot.job_id}</span>
                     </div>
-                    <div class="flex items-center gap-2 shrink-0 ml-2">
-                        <span class="text-xs text-appleMuted font-mono">${slot.scanned_at || '—'}</span>
-                        ${badge}
+                    <div class="flex flex-col items-end shrink-0 ml-4">
+                        <span class="status-pill ${statusClass} mb-1.5">${statusLabel}</span>
+                        <span class="text-[10px] text-appleMuted font-mono bg-white/5 px-2 py-0.5 rounded">${slot.scanned_at || '—'}</span>
                     </div>
                 </div>
-                <div class="grid grid-cols-2 gap-3 mt-2 pt-2 border-t border-white/5">
-                    <div>
-                        <p class="text-xs uppercase tracking-wider text-appleMuted mb-1">DATA INFO</p>
-                        ${targetRows || '<span class="text-xs text-appleMuted">—</span>'}
+                
+                <div class="grid grid-cols-2 gap-6 mt-4">
+                    <div class="bg-white/[0.03] p-3 rounded-xl border border-white/5">
+                        <div class="flex items-center gap-2 mb-2">
+                            <div class="w-1.5 h-1.5 rounded-full bg-blue-400 shadow-[0_0_8px_rgba(41,151,255,0.4)]"></div>
+                            <p class="text-[10px] font-bold uppercase tracking-widest text-appleMuted">Data Info</p>
+                        </div>
+                        <div class="space-y-0.5">
+                            ${targetRows || '<p class="text-[11px] text-appleMuted italic">No target data</p>'}
+                        </div>
                     </div>
-                    <div>
-                        <p class="text-xs uppercase tracking-wider text-appleMuted mb-1">TRAY INFO</p>
-                        ${detectedRows || '<span class="text-xs text-appleMuted">—</span>'}
+                    <div class="bg-white/[0.03] p-3 rounded-xl border border-white/5">
+                        <div class="flex items-center gap-2 mb-2">
+                            <div class="w-1.5 h-1.5 rounded-full ${isMatch ? 'bg-green-400 shadow-[0_0_8px_rgba(52,199,89,0.4)]' : 'bg-red-400 shadow-[0_0_8px_rgba(255,59,48,0.4)]'}"></div>
+                            <p class="text-[10px] font-bold uppercase tracking-widest text-appleMuted">Tray Info</p>
+                        </div>
+                        <div class="space-y-0.5">
+                            ${detectedRows || '<p class="text-[11px] text-appleMuted italic">No detection</p>'}
+                        </div>
                     </div>
                 </div>
             </div>
@@ -164,16 +174,17 @@ function renderTopMissing(missingCounts) {
     }
 
     missingWidget.innerHTML = sortedMissing.map(([itemName, count], index) => {
-        const bgColors = ['bg-red-500/20', 'bg-orange-500/20', 'bg-yellow-500/20', 'bg-white/10', 'bg-white/10'];
-        const textColors = ['text-red-400', 'text-orange-400', 'text-yellow-400', 'text-appleMuted', 'text-appleMuted'];
+        const bgColors = ['bg-red-500/15', 'bg-orange-500/15', 'bg-yellow-500/15', 'bg-white/5', 'bg-white/5'];
+        const textColors = ['text-red-400', 'text-orange-400', 'text-yellow-400', 'text-gray-400', 'text-gray-400'];
+        const borderColors = ['border-red-500/20', 'border-orange-500/20', 'border-yellow-500/20', 'border-white/5', 'border-white/5'];
 
         return `
-            <div class="flex items-center justify-between p-3 border-b border-white/5 last:border-0 hover:bg-white/5 transition-colors rounded-lg">
-                <div class="flex items-center gap-3 truncate">
-                    <span class="text-xs font-bold text-gray-500 w-4">${index + 1}</span>
-                    <span class="text-sm font-medium truncate">${itemName}</span>
+            <div class="flex items-center justify-between p-4 bg-white/[0.03] border ${borderColors[index]} rounded-2xl hover:bg-white/[0.06] transition-all group">
+                <div class="flex items-center gap-4 min-w-0">
+                    <span class="text-xs font-bold text-white/20 group-hover:text-white/40 transition-colors w-4">${index + 1}</span>
+                    <span class="text-sm font-semibold truncate leading-none pt-0.5">${itemName}</span>
                 </div>
-                <div class="px-2.5 py-1 ${bgColors[index]} ${textColors[index]} rounded font-bold text-xs shrink-0">
+                <div class="px-3 py-1.5 ${bgColors[index]} ${textColors[index]} rounded-xl font-bold text-[10px] uppercase tracking-wider shrink-0 border border-current/10">
                     ${count} missing
                 </div>
             </div>

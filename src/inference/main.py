@@ -1,19 +1,16 @@
 """
-main.py — Inference Agent FastAPI 서버
+main.py — Inference Agent FastAPI server
 
-아키텍처:
-  ┌──────────────────────────────────────────────────────────┐
-  │  FastAPI Process (메인)                                   │
-  │  ├─ POST /inference ─→ request_queue ─→ [InferWorker]    │
-  │  │                  ←─ response_queue ←                  │
-  │  ├─ GET  /health                                         │
-  │  ├─ GET  /metrics                                        │
-  │  └─ Thread: NPUTemperatureMonitor (5초 주기 폴링)        │
-  └──────────────────────────────────────────────────────────┘
-  ┌──────────────────────────────────────────────────────────┐
-  │  InferenceWorker Process (별도)                          │
-  │  └─ Hailo-8 SDK 단독 점유 / 메모리 누수 격리             │
-  └──────────────────────────────────────────────────────────┘
+Architecture:
+  FastAPI Process (main)
+  ├─ POST /inference → request_queue → [InferenceWorker]
+  │                 ← response_queue ←
+  ├─ GET  /health
+  ├─ GET  /metrics
+  └─ Thread: NPUTemperatureMonitor (5s polling)
+
+  InferenceWorker Process (separate)
+  └─ Sole owner of Hailo-8 SDK / memory leak isolation
 """
 
 from __future__ import annotations
@@ -40,7 +37,7 @@ from src.inference.schemas import (
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 설정
+# Config
 # ─────────────────────────────────────────────────────────────────────────────
 
 logging.basicConfig(
@@ -56,29 +53,27 @@ INFERENCE_TIMEOUT = float(os.getenv("INFERENCE_TIMEOUT_SEC", "10"))
 MODULE_NAME = os.getenv("MODULE_NAME", "InferenceAgent")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 전역 상태 (프로세스 수명 동안 유지)
+# Global state
 # ─────────────────────────────────────────────────────────────────────────────
 
-request_queue: mp.Queue = mp.Queue(maxsize=16)   # 최대 16개 동시 요청 버퍼링
+request_queue: mp.Queue = mp.Queue(maxsize=16)
 response_queue: mp.Queue = mp.Queue()
 stop_event: mp.Event = mp.Event()
 worker_process: mp.Process | None = None
 temp_monitor: NPUTemperatureMonitor | None = None
 
-# 누적 통계
 _total_inferences: int = 0
 _total_inference_time_ms: float = 0.0
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Lifespan: 앱 시작/종료 시 리소스 관리
+# Lifespan
 # ─────────────────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     global worker_process, temp_monitor
 
-    # ── 추론 워커 프로세스 시작 ────────────────────────────────────────────────
     worker_process = mp.Process(
         target=inference_worker,
         args=(HEF_PATH, request_queue, response_queue, stop_event),
@@ -88,16 +83,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     worker_process.start()
     logger.info("Inference worker process started (pid=%d)", worker_process.pid)
 
-    # ── 온도 모니터 스레드 시작 ───────────────────────────────────────────────
     temp_monitor = NPUTemperatureMonitor(
         warning_threshold=TEMP_WARNING,
         critical_threshold=TEMP_CRITICAL,
     )
     temp_monitor.start()
 
-    yield  # ── 서버 실행 중 ───────────────────────────────────────────────────
+    yield
 
-    # ── 종료 처리 ─────────────────────────────────────────────────────────────
     logger.info("Shutting down inference services...")
     stop_event.set()
 
@@ -114,19 +107,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FastAPI 앱 정의
+# FastAPI app
 # ─────────────────────────────────────────────────────────────────────────────
 
 app = FastAPI(
     title="Inference Agent API",
-    description="Hailo-8 NPU 기반 YOLO 객체 탐지 서비스",
+    description="Hailo-8 NPU YOLO object detection service",
     version="1.0.0",
     lifespan=lifespan,
 )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 헬퍼
+# Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _thermal_status() -> ThermalStatus:
@@ -148,30 +141,23 @@ def _worker_alive() -> bool:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 엔드포인트
+# Endpoints
 # ─────────────────────────────────────────────────────────────────────────────
 
 @app.post(
     "/inference",
     response_model=PredictResponse,
-    summary="이미지 추론 (YOLO)",
-    description=(
-        "JPEG/PNG 이미지 바이너리를 받아 Hailo-8 NPU로 추론 후 탐지 결과를 반환합니다.\n\n"
-        "- 과열(≥95°C) 시 503 반환\n"
-        "- 추론 프로세스 다운 시 503 반환\n"
-        "- 타임아웃 시 504 반환"
-    ),
+    summary="Image inference (YOLO)",
     responses={
-        503: {"description": "NPU 과열 또는 추론 프로세스 비정상"},
-        504: {"description": "추론 타임아웃"},
+        503: {"description": "NPU overheat or worker process down"},
+        504: {"description": "Inference timeout"},
     },
 )
 async def predict(
-    image: UploadFile = File(..., description="추론할 이미지 파일 (JPEG / PNG)"),
+    image: UploadFile = File(..., description="Image file to infer (JPEG / PNG)"),
 ) -> PredictResponse:
     global _total_inferences, _total_inference_time_ms
 
-    # ── 과열 보호: CRITICAL 상태면 추론 거부 ─────────────────────────────────
     if _thermal_status() == ThermalStatus.CRITICAL:
         msg = temp_monitor.warning_message() if temp_monitor else "NPU critical overheat"
         raise HTTPException(
@@ -179,21 +165,18 @@ async def predict(
             detail=msg,
         )
 
-    # ── 워커 프로세스 생존 확인 ───────────────────────────────────────────────
     if not _worker_alive():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Inference worker process is not running",
         )
 
-    # ── 큐 포화 확인 ──────────────────────────────────────────────────────────
     if request_queue.full():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Inference queue is full — try again later",
         )
 
-    # ── 이미지 바이너리 읽기 ──────────────────────────────────────────────────
     image_bytes = await image.read()
     if not image_bytes:
         raise HTTPException(
@@ -201,11 +184,9 @@ async def predict(
             detail="Empty image file",
         )
 
-    # ── 추론 요청 전송 ────────────────────────────────────────────────────────
     request_id = str(uuid.uuid4())
     request_queue.put({"request_id": request_id, "image_bytes": image_bytes})
 
-    # ── 응답 수신 (동기 블로킹 — asyncio.get_event_loop.run_in_executor 대안) ─
     import asyncio
 
     loop = asyncio.get_event_loop()
@@ -224,11 +205,9 @@ async def predict(
             detail=f"Inference error: {result['error']}",
         )
 
-    # ── 통계 갱신 ──────────────────────────────────────────────────────────────
     _total_inferences += 1
     _total_inference_time_ms += result["inference_time_ms"]
 
-    # ── 과열 경고 첨부 (WARNING 수준) ─────────────────────────────────────────
     warning_msg = temp_monitor.warning_message() if temp_monitor else None
 
     return PredictResponse(
@@ -241,7 +220,6 @@ async def predict(
 
 
 def _wait_for_response(request_id: str) -> dict | None:
-    """response_queue를 폴링하여 해당 request_id의 결과를 반환."""
     import time
 
     deadline = time.monotonic() + INFERENCE_TIMEOUT
@@ -254,24 +232,18 @@ def _wait_for_response(request_id: str) -> dict | None:
             continue
 
         if item["request_id"] == request_id:
-            # 다른 요청의 응답은 큐에 돌려놓기
             for p in pending:
                 response_queue.put(p)
             return item
         else:
             pending.append(item)
 
-    # 타임아웃: 대기 중이던 다른 응답 복원
     for p in pending:
         response_queue.put(p)
     return None
 
 
-@app.get(
-    "/health",
-    response_model=HealthResponse,
-    summary="헬스 체크",
-)
+@app.get("/health", response_model=HealthResponse, summary="Health check")
 async def health_check() -> HealthResponse:
     alive = _worker_alive()
     thermal = _thermal_status()
@@ -284,12 +256,7 @@ async def health_check() -> HealthResponse:
     )
 
 
-@app.get(
-    "/metrics",
-    response_model=MetricsResponse,
-    summary="운영 메트릭",
-    description="NPU 온도, 누적 추론 횟수, 평균 추론 시간을 반환합니다.",
-)
+@app.get("/metrics", response_model=MetricsResponse, summary="Operational metrics")
 async def metrics() -> MetricsResponse:
     avg_ms = (
         _total_inference_time_ms / _total_inferences
@@ -306,7 +273,7 @@ async def metrics() -> MetricsResponse:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 전역 예외 핸들러
+# Global exception handler
 # ─────────────────────────────────────────────────────────────────────────────
 
 @app.exception_handler(Exception)
@@ -319,16 +286,15 @@ async def global_exception_handler(request, exc: Exception) -> JSONResponse:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 엔트리포인트
+# Entry point
 # ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    # spawn 방식: POSIX fork보다 안전 (PyTorch, Hailo SDK와 호환)
     mp.set_start_method("spawn", force=True)
     uvicorn.run(
         "src.inference.main:app",
         host="0.0.0.0",
         port=8001,
-        workers=1,           # Hailo 디바이스는 단일 워커만 점유
+        workers=1,
         log_level="info",
     )

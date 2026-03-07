@@ -1,16 +1,12 @@
 """
-buffer.py — 소프트웨어 더블 버퍼 + 공유 디스플레이 상태
+buffer.py — Software double buffer + shared display state
 
-더블 버퍼링 원리:
-  ┌─────────────┐   render   ┌─────────────┐
-  │  Back Buffer│ ─────────→ │ Front Buffer│ → cv2.imshow()
-  │  (쓰기 전용) │  flip()    │ (읽기 전용) │
-  └─────────────┘←──────────└─────────────┘
-                   다음 프레임
+Double buffering:
+  Back Buffer (write) → flip() → Front Buffer (read) → cv2.imshow()
 
-- 렌더 스레드가 백 버퍼에 완성된 프레임을 모두 그린 뒤 flip()
-- imshow()는 항상 완성된 프론트 버퍼만 표시 → 중간 상태 절대 노출 안 됨
-- 테두리 색상 변경 시도 화면 찢힘(tearing) / 깜빡임 없음
+- Render thread draws a complete frame to the back buffer, then calls flip()
+- imshow() always reads the completed front buffer — no partial frames exposed
+- No tearing or flicker on border color transitions
 """
 
 from __future__ import annotations
@@ -35,14 +31,14 @@ from src.display.schemas import (
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 더블 버퍼
+# Double Buffer
 # ─────────────────────────────────────────────────────────────────────────────
 
 class DoubleBuffer:
     """
-    numpy 배열 기반 소프트웨어 더블 버퍼.
-    렌더 스레드: back에 그리고 flip() 호출
-    디스플레이:  get_front()로 완성된 프레임 획득
+    Software double buffer backed by numpy arrays.
+    Render thread writes to back and calls flip().
+    Display reads from get_front() for the completed frame.
     """
 
     def __init__(self, width: int, height: int) -> None:
@@ -55,16 +51,13 @@ class DoubleBuffer:
 
     @property
     def back(self) -> np.ndarray:
-        """렌더링 대상 백 버퍼 (렌더 스레드 전용)."""
         return self._back
 
     def flip(self) -> None:
-        """백 ↔ 프론트 원자적 교체. 렌더 완료 후 반드시 호출."""
         with self._lock:
             self._back, self._front = self._front, self._back
 
     def get_front(self) -> np.ndarray:
-        """프론트 버퍼 복사본 반환 (스레드 안전)."""
         with self._lock:
             return self._front.copy()
 
@@ -74,28 +67,28 @@ class DoubleBuffer:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 공유 디스플레이 상태 (API ↔ 렌더 스레드 공유)
+# Shared Display State (shared between API thread and render thread)
 # ─────────────────────────────────────────────────────────────────────────────
 
 @dataclass
 class _StateSnapshot:
-    """렌더 루프가 한 프레임에 사용하는 상태 스냅샷 (불변)."""
+    """Immutable state snapshot used by the render loop for one frame."""
     base_frame: Optional[np.ndarray]
     detections: list[Detection]
     ai_status: AIStatus
     network_status: NetworkStatus
     tray_items: list[TrayItem]
     border_color: BorderColor
-    target_border_color: BorderColor    # 전환 목표색
-    transition_progress: float          # 0.0 → 1.0 (색상 전환 진행률)
+    target_border_color: BorderColor
+    transition_progress: float  # 0.0 → 1.0
     scan_info: Optional[ScanInfo] = None
     flash_text: Optional[str] = None
 
 
 class DisplayState:
     """
-    API 스레드와 렌더 스레드 사이의 공유 상태.
-    모든 쓰기/읽기는 내부 RLock으로 보호.
+    Shared state between the API thread and render thread.
+    All reads/writes protected by an internal RLock.
     """
 
     def __init__(self) -> None:
@@ -107,15 +100,15 @@ class DisplayState:
         self._tray_items: list[TrayItem] = []
         self._border_color = BorderColor.YELLOW
         self._target_border_color = BorderColor.YELLOW
-        self._transition_progress: float = 1.0  # 초기엔 전환 완료 상태
+        self._transition_progress: float = 1.0
         self._scan_info: Optional[ScanInfo] = None
         self._flash_text: Optional[str] = None
         self._flash_expires_at: float = 0.0
 
         self.stop_requested: bool = False
-        self.actual_fps: float = 0.0          # 렌더 스레드가 갱신
+        self.actual_fps: float = 0.0
 
-    # ── API 스레드: 쓰기 ──────────────────────────────────────────────────────
+    # ── API thread: writes ────────────────────────────────────────────────────
 
     def update_frame(self, image_bytes: bytes, detections: list[Detection]) -> None:
         arr = np.frombuffer(image_bytes, dtype=np.uint8)
@@ -146,17 +139,15 @@ class DisplayState:
                 self._flash_text = flash_text
                 self._flash_expires_at = time.monotonic() + 3.0
             if border_color is not None and border_color != self._target_border_color:
-                # 새 색상으로 부드럽게 전환 시작
                 self._border_color = _interpolated_color(
                     self._border_color, self._target_border_color, self._transition_progress
                 )
                 self._target_border_color = border_color
                 self._transition_progress = 0.0
 
-    # ── 렌더 스레드: 읽기 ────────────────────────────────────────────────────
+    # ── Render thread: reads ──────────────────────────────────────────────────
 
     def snapshot(self, delta_progress: float = 0.08) -> _StateSnapshot:
-        """현재 상태 스냅샷 반환 + 색상 전환 진행."""
         with self._lock:
             self._transition_progress = min(1.0, self._transition_progress + delta_progress)
             now = time.monotonic()
@@ -176,7 +167,7 @@ class DisplayState:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 색상 전환 헬퍼
+# Color interpolation helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
 _BGR_COLORS: dict[BorderColor, tuple[int, int, int]] = {
@@ -191,16 +182,10 @@ def _interpolated_color(
     to_color: BorderColor,
     t: float,
 ) -> BorderColor:
-    """
-    t(0~1) 기반 보간: 0이면 from, 1이면 to 반환.
-    중간값은 가장 가까운 색으로 스냅.
-    (실제 RGB 보간은 HUDRenderer에서 수행)
-    """
     return from_color if t < 0.5 else to_color
 
 
 def get_border_bgr(snap: _StateSnapshot) -> tuple[int, int, int]:
-    """전환 진행률에 따라 보간된 BGR 색상 반환."""
     t = snap.transition_progress
     src = _BGR_COLORS[snap.border_color]
     dst = _BGR_COLORS[snap.target_border_color]

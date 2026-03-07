@@ -1,20 +1,20 @@
 """
-uploader.py — Firebase Storage & Firestore 업로더
+uploader.py — Firebase Storage & Firestore uploader
 
-인증 전략 (우선순위):
-  1. FIREBASE_CREDENTIALS_JSON  (환경변수에 JSON 문자열)
-  2. FIREBASE_CREDENTIALS_PATH  (환경변수에 서비스 계정 파일 경로)
-  3. GOOGLE_APPLICATION_CREDENTIALS (GCP 표준 환경변수)
-  위 모두 없으면 → 시뮬레이션 모드
+Credential resolution (priority order):
+  1. FIREBASE_CREDENTIALS_JSON  (env var with JSON string)
+  2. FIREBASE_CREDENTIALS_PATH  (env var with service account file path)
+  3. GOOGLE_APPLICATION_CREDENTIALS (GCP standard env var)
+  If none found → simulation mode
 
-Firestore 문서 구조:
+Firestore document structure:
   /sync_events/{doc_id}
     ├── event_type: str
     ├── expected_count: int
     ├── actual_count: int
     ├── missing_items: list
     ├── detected_items: list
-    ├── snapshot_urls: list[str]   ← Firebase Storage URL
+    ├── snapshot_urls: list[str]
     ├── timestamp: Timestamp
     └── metadata: dict
 """
@@ -42,11 +42,10 @@ FIRESTORE_COLLECTION = os.getenv("FIRESTORE_COLLECTION", "sync_events")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 업로더 팩토리
+# Uploader factory
 # ─────────────────────────────────────────────────────────────────────────────
 
 def create_uploader() -> "BaseUploader":
-    """자격증명 유무에 따라 실제/시뮬레이션 업로더 반환."""
     cred = _load_credentials()
     if cred is not None:
         try:
@@ -61,8 +60,6 @@ def create_uploader() -> "BaseUploader":
 
 
 def _load_credentials():
-    """환경변수에서 Firebase 자격증명 로드. 없으면 None 반환."""
-    # 1) JSON 문자열
     cred_json = os.getenv("FIREBASE_CREDENTIALS_JSON")
     if cred_json:
         try:
@@ -72,7 +69,6 @@ def _load_credentials():
         except Exception as exc:
             logger.warning("FIREBASE_CREDENTIALS_JSON parse error: %s", exc)
 
-    # 2) 파일 경로
     cred_path = os.getenv("FIREBASE_CREDENTIALS_PATH") or os.getenv(
         "GOOGLE_APPLICATION_CREDENTIALS"
     )
@@ -87,7 +83,7 @@ def _load_credentials():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 베이스 클래스
+# Base class
 # ─────────────────────────────────────────────────────────────────────────────
 
 class BaseUploader:
@@ -98,10 +94,6 @@ class BaseUploader:
         payload: dict,
         shots: list[dict],
     ) -> tuple[str, list[str]]:
-        """
-        이벤트 업로드.
-        Returns: (firestore_doc_id, [storage_url, ...])
-        """
         raise NotImplementedError
 
     async def is_reachable(self) -> bool:
@@ -109,7 +101,7 @@ class BaseUploader:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 실제 Firebase 업로더
+# Real Firebase uploader
 # ─────────────────────────────────────────────────────────────────────────────
 
 class FirebaseUploader(BaseUploader):
@@ -119,7 +111,6 @@ class FirebaseUploader(BaseUploader):
         import firebase_admin  # type: ignore[import]
         from firebase_admin import firestore, storage  # type: ignore[import]
 
-        # 앱이 이미 초기화된 경우 재사용
         try:
             self._app = firebase_admin.get_app()
         except ValueError:
@@ -146,7 +137,6 @@ class FirebaseUploader(BaseUploader):
     ) -> tuple[str, list[str]]:
         from google.cloud.firestore_v1 import SERVER_TIMESTAMP  # type: ignore[import]
 
-        # 1) Storage: 스냅샷 3장 업로드
         storage_urls: list[str] = []
         timestamp_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
@@ -164,7 +154,6 @@ class FirebaseUploader(BaseUploader):
             storage_urls.append(blob.public_url)
             logger.info("Uploaded shot %d → %s", shot["shot"], blob.public_url)
 
-        # 2) Firestore: 이벤트 문서 생성
         doc_ref = self._db.collection(FIRESTORE_COLLECTION).document()
         doc_ref.set({
             **payload,
@@ -188,7 +177,7 @@ class FirebaseUploader(BaseUploader):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 시뮬레이션 업로더 (Firebase 자격증명 없을 때)
+# Simulation uploader (no Firebase credentials)
 # ─────────────────────────────────────────────────────────────────────────────
 
 class SimulationUploader(BaseUploader):
@@ -199,7 +188,6 @@ class SimulationUploader(BaseUploader):
         payload: dict,
         shots: list[dict],
     ) -> tuple[str, list[str]]:
-        # 네트워크 업로드 지연 시뮬레이션
         await asyncio.sleep(0.3 + random.uniform(0, 0.2))
 
         timestamp_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -222,4 +210,4 @@ class SimulationUploader(BaseUploader):
         return doc_id, storage_urls
 
     async def is_reachable(self) -> bool:
-        return True   # 시뮬레이션 모드에서는 항상 True
+        return True

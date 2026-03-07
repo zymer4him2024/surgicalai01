@@ -26,6 +26,8 @@ services:
       - QR_DEBOUNCE_SEC=30.0
       - DEFAULT_TARGET={}
       - DEVICE_MASTER_URL=http://device_master_agent:8005
+    volumes:
+      - /sys/class/thermal:/sys/class/thermal:ro  # CPU 온도 읽기용
     depends_on:
       - device_master_agent
 
@@ -98,7 +100,7 @@ services:
       antigravity_bridge:
         ipv4_address: 172.20.0.12
     devices:
-      - /dev/video0:/dev/video0 # CSI / USB 카메라 디바이스
+      - /dev/video1:/dev/video0 # CSI / USB 카메라 디바이스
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8002/health" ]
       interval: 30s
@@ -193,15 +195,42 @@ services:
       - MODULE_NAME=DeviceMasterAgent
       - DEVICE_CACHE_PATH=/app/data/device_cache.json
       - DEVICE_CACHE_TTL_HOURS=168
+      - HOSPITAL_API_URL=http://mock_hospital_api:8006   # 실제 병원 서버로 교체 시 이 줄만 변경
+      - HOSPITAL_API_KEY=test-api-key-12345
     volumes:
       - ./data:/app/data # 캐시 파일 영속화
       - ./firebase-credentials.json:/app/firebase-credentials.json:ro
+    depends_on:
+      - mock_hospital_api
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8005/health" ]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 15s
+
+  mock_hospital_api:
+    build:
+      context: .
+      dockerfile: Dockerfile.mock_hospital_api
+    container_name: mock_hospital_api
+    restart: unless-stopped
+    command: python -m src.mock_hospital_api.main
+    expose:
+      - "8006"
+    ports:
+      - "8006:8006" # 외부 테스트/검증용
+    networks:
+      antigravity_bridge:
+        ipv4_address: 172.20.0.16
+    environment:
+      - MODULE_NAME=MockHospitalAPI
+      - HOSPITAL_API_KEY=test-api-key-12345
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8006/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
 networks:
   antigravity_bridge:

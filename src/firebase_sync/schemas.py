@@ -1,5 +1,5 @@
 """
-schemas.py — Firebase Sync Agent API 스키마
+schemas.py — Firebase Sync Agent API schemas
 """
 
 from __future__ import annotations
@@ -11,9 +11,9 @@ from pydantic import BaseModel, Field
 
 
 class EventType(str, Enum):
-    MISMATCH = "mismatch"      # 탐지 수량 불일치 (스냅샷 3장 촬영)
-    ALERT = "alert"            # 크리티컬 경고 (NPU 과열 등)
-    PERIODIC = "periodic"      # 주기적 정상 상태 기록
+    MISMATCH = "mismatch"      # detection count mismatch (3 snapshots taken)
+    ALERT = "alert"            # critical warning (NPU overheat, etc.)
+    PERIODIC = "periodic"      # periodic normal-state recording
 
 
 class ItemStatus(str, Enum):
@@ -24,18 +24,18 @@ class ItemStatus(str, Enum):
 
 
 class SyncRequest(BaseModel):
-    """POST /sync — 동기화 이벤트 요청"""
+    """POST /sync — sync event request"""
 
     event_type: EventType
-    expected_count: int = Field(0, ge=0, description="예상 기구 수")
-    actual_count: int = Field(0, ge=0, description="탐지된 기구 수")
-    missing_items: list[str] = Field(default_factory=list, description="누락 기구 목록")
-    detected_items: list[dict] = Field(default_factory=list, description="탐지 결과 (detections)")
-    metadata: dict = Field(default_factory=dict, description="추가 메타데이터")
+    expected_count: int = Field(0, ge=0, description="Expected instrument count")
+    actual_count: int = Field(0, ge=0, description="Detected instrument count")
+    missing_items: list[str] = Field(default_factory=list, description="Missing instrument list")
+    detected_items: list[dict] = Field(default_factory=list, description="Detection results")
+    metadata: dict = Field(default_factory=dict, description="Additional metadata")
 
 
 class SyncResponse(BaseModel):
-    """POST /sync 응답"""
+    """POST /sync response"""
 
     event_id: int
     status: str = "queued"
@@ -43,7 +43,7 @@ class SyncResponse(BaseModel):
 
 
 class QueueItemDetail(BaseModel):
-    """GET /queue/item/{event_id} 응답"""
+    """GET /queue/item/{event_id} response"""
 
     event_id: int
     event_type: str
@@ -56,7 +56,7 @@ class QueueItemDetail(BaseModel):
 
 
 class QueueStatusResponse(BaseModel):
-    """GET /queue/status 응답"""
+    """GET /queue/status response"""
 
     total_pending: int
     total_processing: int
@@ -67,7 +67,7 @@ class QueueStatusResponse(BaseModel):
 
 
 class HealthResponse(BaseModel):
-    """GET /health 응답"""
+    """GET /health response"""
 
     status: str
     module: str
