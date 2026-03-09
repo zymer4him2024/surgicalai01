@@ -1,364 +1,800 @@
 """
-hud.py — HUD(Heads-Up Display) 렌더러
+main.py — Gateway Agent / Main Controller (Module B)
 
-레이아웃 (1920×1080 기준):
-  ┌─────────────────────────────────────────────────────────────┐
-  │ [AI STATUS]  (좌상단)          [NETWORK]    (우상단)        │
-  │  ● Inference  Ready             ● Gateway    Online         │
-  │  ● FPS        24.3              ● Inference  Online         │
-  │  ● NPU Temp   72°C              ● Camera     Online         │
-  │  ● Thermal    Normal                                        │
-  │                                                             │
-  │                  (카메라 피드 + 바운딩 박스)                  │
-  │                                                             │
-  │ [TRAY INFO]  (좌하단)                                       │
-  │  scalpel          × 2                                       │
-  │  forceps          × 1                                       │
-  │  ─────────────────────                                      │
-  │  Total            3 pcs                                     │
-  │                      [테두리 8px — 색상: 녹/황/적 보간]      │
-  └─────────────────────────────────────────────────────────────┘
+Handles external client communication and system state machine.
+
+Routing:
+  POST /inference → inference_agent:8001/inference
+  GET  /health   → gateway health + internal module aggregated status
+  GET  /status   → per-module detailed status
+  POST /job      → new tray QR scan simulation
 """
 
 from __future__ import annotations
 
+import asyncio
+import base64
+from datetime import datetime
+import json as _json
+import logging
+import os
+import time
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator, Any
+
 import cv2
+import httpx
 import numpy as np
+import uvicorn
+from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile, status
+from fastapi.responses import JSONResponse
+from pyzbar.pyzbar import decode as qr_decode
 
-from src.display.buffer import _StateSnapshot, get_border_bgr
-from src.display.schemas import BorderColor, Detection
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 상수
-# ─────────────────────────────────────────────────────────────────────────────
-
-FONT = cv2.FONT_HERSHEY_DUPLEX
-FONT_SMALL = cv2.FONT_HERSHEY_SIMPLEX
-
-C_WHITE = (230, 230, 230)
-C_GRAY = (150, 150, 150)
-C_PANEL = (15, 15, 15)          # 패널 배경 (거의 검정)
-C_PANEL_BORDER = (60, 60, 60)
-C_HEADER = (200, 200, 200)
-
-C_OK = (80, 220, 80)            # 녹색
-C_WARN = (0, 200, 240)          # 황색
-C_ERR = (50, 50, 220)           # 적색
-C_OFF = (100, 100, 100)         # 회색 (오프라인)
-
-# 탐지 박스 색상 (BGR)
-C_BBOX = (0, 200, 255)          # 황금색
-C_BBOX_TEXT_BG = (0, 140, 200)
-
-BORDER_THICKNESS = 10
-PANEL_ALPHA = 0.70              # 패널 배경 불투명도
-
+from src.gateway.tracker import SurgicalTracker
 
 # ─────────────────────────────────────────────────────────────────────────────
-# HUD 렌더러
+# Config
 # ─────────────────────────────────────────────────────────────────────────────
 
-class HUDRenderer:
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(name)s] %(levelname)s %(message)s",
+)
+logger = logging.getLogger("gateway.main")
 
-    def render(self, canvas: np.ndarray, snap: _StateSnapshot) -> None:
-        """canvas(백 버퍼)에 모든 HUD 요소를 합성."""
-        h, w = canvas.shape[:2]
+MODULE_NAME = os.getenv("MODULE_NAME", "GatewayAgent")
+INFERENCE_URL = os.getenv("INFERENCE_URL", "http://inference_agent:8001")
+# For 3rd party integration, INFERENCE_ENDPOINT can be set to /predict
+INFERENCE_ENDPOINT = os.getenv("INFERENCE_ENDPOINT", "/inference")
+CAMERA_URL = os.getenv("CAMERA_URL", "http://camera_agent:8002")
 
-        # 1) 베이스 프레임 (카메라 영상)
-        if snap.base_frame is not None:
-            resized = cv2.resize(snap.base_frame, (w, h), interpolation=cv2.INTER_LINEAR)
-            canvas[:] = resized
+DISPLAY_URL = os.getenv("DISPLAY_URL", "http://display_agent:8003")
+FIREBASE_SYNC_URL = os.getenv("FIREBASE_SYNC_URL", "http://firebase_sync_agent:8004")
+DEVICE_MASTER_URL = os.getenv("DEVICE_MASTER_URL", "http://device_master_agent:8005")
+
+GATEWAY_TIMEOUT = float(os.getenv("GATEWAY_TIMEOUT_SEC", "15"))
+HEALTH_TIMEOUT = 3.0
+QR_SCAN_INTERVAL_SEC = float(os.getenv("QR_SCAN_INTERVAL_SEC", "1.0"))
+QR_DEBOUNCE_SEC = float(os.getenv("QR_DEBOUNCE_SEC", "30.0"))
+try:
+    DEFAULT_TARGET: dict[str, int] = _json.loads(os.getenv("DEFAULT_TARGET", "{}"))
+except (ValueError, TypeError):
+    DEFAULT_TARGET = {}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Shared HTTP client
+# ─────────────────────────────────────────────────────────────────────────────
+
+_http_client: httpx.AsyncClient | None = None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# State machine
+# ─────────────────────────────────────────────────────────────────────────────
+
+class SystemState:
+    READY = "READY"  # scanning (target N items) - yellow
+    MATCH = "MATCH"  # count matches - green
+    ERROR = "ERROR"  # mismatch (5s → snapshot) - red
+
+current_state: str = SystemState.READY
+current_job: dict[str, Any] | None = None
+mismatch_start_time: float | None = None
+inference_running: bool = True
+camera_active: bool = True
+display_active: bool = True
+latest_detections: list[dict] = []
+_tracked_detections: list[dict] = []
+last_scanned_qr: str | None = None
+_match_achieved_at: float | None = None
+_error_achieved_at: float | None = None
+_pending_preset: dict | None = None
+_latest_tracked_dets: list[dict] = []
+
+_tracker = SurgicalTracker(
+    max_age=8,         # ~0.7s at 12 FPS, prevents ghost counts at lower FPS
+    min_hits=2,        # faster confirmation
+    iou_threshold=0.35,
+    ema_alpha=0.5,
+)
+
+
+def _iou_boxes(a: list[float], b: list[float]) -> float:
+    ix1, iy1 = max(a[0], b[0]), max(a[1], b[1])
+    ix2, iy2 = min(a[2], b[2]), min(a[3], b[3])
+    inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+    area_a = max(0.0, a[2] - a[0]) * max(0.0, a[3] - a[1])
+    area_b = max(0.0, b[2] - b[0]) * max(0.0, b[3] - b[1])
+    union = area_a + area_b - inter
+    return inter / union if union > 0 else 0.0
+
+
+def _smooth_detections(new_dets: list[dict], prev_dets: list[dict], alpha: float = 0.5) -> list[dict]:
+    """IoU matching + EMA to suppress bounding box jitter."""
+    if not prev_dets:
+        return new_dets
+    smoothed = []
+    for det in new_dets:
+        best_iou, best_prev = 0.0, None
+        for prev in prev_dets:
+            if prev.get("class_name") != det.get("class_name"):
+                continue
+            iou = _iou_boxes(det["bbox"], prev["bbox"])
+            if iou > best_iou:
+                best_iou, best_prev = iou, prev
+        if best_prev and best_iou > 0.15:
+            nb, pb = det["bbox"], best_prev["bbox"]
+            bbox = [round(alpha * n + (1 - alpha) * p, 2) for n, p in zip(nb, pb)]
+            smoothed.append({**det, "bbox": bbox})
         else:
-            canvas[:] = (18, 18, 18)  # 프레임 없을 때 어두운 배경
-            self._draw_waiting(canvas)
+            smoothed.append(det)
+    return smoothed
 
-        # 2) 바운딩 박스 오버레이
-        self._draw_detections(canvas, snap.detections)
 
-        # 3) HUD 패널들
-        self._draw_ai_panel(canvas, snap, x=16, y=16)
-        self._draw_network_panel(canvas, snap, x=w - 260, y=16)
-        ROW_H = 26
-        if snap.scan_info is not None:
-            n_targets = sum(1 for v in snap.scan_info.target.values() if v > 0)
-            data_ph = 62 + max(1, n_targets) * ROW_H
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    global _http_client
+    _http_client = httpx.AsyncClient(
+        timeout=GATEWAY_TIMEOUT,
+        limits=httpx.Limits(max_connections=100, max_keepalive_connections=30),
+    )
+    logger.info(
+        "Gateway started — INFERENCE_URL=%s, CAMERA_URL=%s", INFERENCE_URL, CAMERA_URL
+    )
+    qr_task = asyncio.create_task(_qr_scan_loop())
+    count_task = asyncio.create_task(_counting_loop())
+    frame_task = asyncio.create_task(_display_frame_loop())
+    prompt_task = asyncio.create_task(_startup_qr_prompt())
+    yield
+    qr_task.cancel()
+    count_task.cancel()
+    frame_task.cancel()
+    prompt_task.cancel()
+    try:
+        await asyncio.gather(qr_task, count_task, frame_task)
+    except asyncio.CancelledError:
+        pass
+    await _http_client.aclose()
+    logger.info("Gateway shutdown — HTTP client closed")
+
+
+def client() -> httpx.AsyncClient:
+    assert _http_client is not None, "HTTP client not initialized"
+    return _http_client
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FastAPI app
+# ─────────────────────────────────────────────────────────────────────────────
+
+app = FastAPI(
+    title="Gateway Agent API",
+    description="Antigravity Surgical AI — single external entry point",
+    version="1.0.0",
+    lifespan=lifespan,
+)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Endpoints
+# ─────────────────────────────────────────────────────────────────────────────
+
+from pydantic import BaseModel
+
+
+class JobRequest(BaseModel):
+    job_id: str
+    target: dict[str, int]
+
+
+@app.post("/job", summary="Register new tray inspection job (QR scan simulation)")
+async def create_job(req: JobRequest, background_tasks: BackgroundTasks):
+    global _pending_preset, current_job, current_state, mismatch_start_time, _match_achieved_at, _error_achieved_at
+    scan_info = {
+        "job_id": req.job_id,
+        "scanned_at": "",
+        "target": req.target,
+    }
+    _pending_preset = {"id": req.job_id, "target": req.target, "scan_info": scan_info}
+    current_job = None
+    current_state = SystemState.READY
+    mismatch_start_time = None
+    _match_achieved_at = None
+    _error_achieved_at = None
+    _tracker.reset()
+    logger.info("Preset loaded (waiting for QR): id=%s target=%s", req.job_id, req.target)
+
+    background_tasks.add_task(
+        client().post,
+        f"{DISPLAY_URL}/hud",
+        json={
+            "border_color": "yellow",
+            "tray_items": [],
+            "scan_info": scan_info,
+            "center_text": "Por favor, escaneie o codigo QR",
+        },
+        timeout=HEALTH_TIMEOUT,
+    )
+    return {"status": "ok", "preset": _pending_preset, "state": current_state}
+
+
+@app.post("/inference", summary="Image inference (YOLO) proxy and state checker")
+async def predict(
+    background_tasks: BackgroundTasks,
+    image: UploadFile = File(..., description="Image to infer (JPEG / PNG)"),
+) -> JSONResponse:
+    image_bytes = await image.read()
+    if not image_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Empty image file",
+        )
+
+    try:
+        resp = await client().post(
+            f"{INFERENCE_URL}{INFERENCE_ENDPOINT}",
+            files={"image": (image.filename or "image.jpg", image_bytes, image.content_type or "image/jpeg")},
+            timeout=GATEWAY_TIMEOUT,
+        )
+    except Exception as exc:
+        logger.error("Inference call failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Inference agent unreachable")
+
+    data = _normalize_inference_response(resp.json())
+
+    global current_state, mismatch_start_time
+    if current_job:
+        actual_counts: dict[str, int] = {}
+        for det in data.get("detections", []):
+            name = det.get("class_name")
+            actual_counts[name] = actual_counts.get(name, 0) + 1
+
+        target_counts = current_job.get("target", {})
+        is_match = True
+        for key, expected in target_counts.items():
+            if actual_counts.get(key, 0) != expected:
+                is_match = False
+                break
+
+        if is_match:
+            current_state = SystemState.MATCH
+            mismatch_start_time = None
         else:
-            data_ph = 0
-        self._draw_data_panel(canvas, snap, x=16, y=h - 200 - data_ph - 8)
-        self._draw_tray_panel(canvas, snap, x=16, y=h - 200)
+            if current_state == SystemState.MATCH:
+                current_state = SystemState.READY
+            if mismatch_start_time is None:
+                mismatch_start_time = time.monotonic()
+            elif time.monotonic() - mismatch_start_time >= 5.0:
+                if current_state != SystemState.ERROR:
+                    background_tasks.add_task(_trigger_snapshot)
+                current_state = SystemState.ERROR
 
-        # 4) 매칭 상태 텍스트 (상단 중앙)
-        self._draw_status_text(canvas, snap)
+        border_color = {"READY": "yellow", "MATCH": "green", "ERROR": "red"}.get(current_state, "yellow")
+        tray_items = [{"class_name": k, "count": v} for k, v in actual_counts.items()]
+        background_tasks.add_task(
+            client().post,
+            f"{DISPLAY_URL}/hud",
+            json={"border_color": border_color, "tray_items": tray_items},
+            timeout=HEALTH_TIMEOUT,
+        )
 
-        # 5) 테두리 (항상 마지막 — 다른 요소 위에 그려짐)
-        self._draw_border(canvas, snap)
+    return JSONResponse(status_code=resp.status_code, content=data)
 
-        # 6) QR 플래시 배너 (테두리 위에 — 일시적 표시)
-        if snap.flash_text:
-            self._draw_flash_banner(canvas, snap.flash_text)
 
-    # ── 대기 화면 ─────────────────────────────────────────────────────────────
+def _parse_qr_target(qr_data: str) -> dict[str, int]:
+    try:
+        parsed = _json.loads(qr_data)
+        if isinstance(parsed, dict) and "target" in parsed:
+            return parsed["target"]
+    except: pass
+    return DEFAULT_TARGET.copy()
 
-    @staticmethod
-    def _draw_waiting(canvas: np.ndarray) -> None:
-        h, w = canvas.shape[:2]
-        text = "Waiting for camera feed..."
-        (tw, _), _ = cv2.getTextSize(text, FONT_SMALL, 0.8, 1)
-        cv2.putText(canvas, text, ((w - tw) // 2, h // 2),
-                    FONT_SMALL, 0.8, C_GRAY, 1, cv2.LINE_AA)
 
-    # ── 탐지 박스 ─────────────────────────────────────────────────────────────
+async def _qr_scan_loop() -> None:
+    global current_job, current_state, mismatch_start_time, last_scanned_qr, _pending_preset
+    last_trigger_time: float = 0.0
+    loop = asyncio.get_running_loop()
 
-    @staticmethod
-    def _draw_detections(canvas: np.ndarray, detections: list[Detection]) -> None:
-        h, w = canvas.shape[:2]
-        for det in detections:
-            # 1) 바운딩 박스 변환
-            x1, y1, x2, y2 = (int(v * s / 640) for v, s in
-                               zip(det.bbox, [w, h, w, h]))
-            cv2.rectangle(canvas, (x1, y1), (x2, y2), C_BBOX, 2, cv2.LINE_AA)
-            
-            # 2) 레이블
-            label = f"{det.class_name} {det.confidence:.0%}"
-            (lw, lh), _ = cv2.getTextSize(label, FONT_SMALL, 0.55, 1)
-            cv2.rectangle(canvas, (x1, y1 - lh - 8), (x1 + lw + 6, y1),
-                          C_BBOX_TEXT_BG, -1)
-            cv2.putText(canvas, label, (x1 + 3, y1 - 4),
-                        FONT_SMALL, 0.55, C_WHITE, 1, cv2.LINE_AA)
-            
-            # 3) 키포인트 (SurgeoNet 12 pts)
-            if det.keypoints:
-                for kp in det.keypoints:
-                    kx, ky = int(kp[0] * w / 640), int(kp[1] * h / 640)
-                    cv2.circle(canvas, (kx, ky), 3, (0, 255, 255), -1, cv2.LINE_AA)
+    logger.info("QR scan loop started")
 
-    # ── AI STATUS 패널 (좌상단) ───────────────────────────────────────────────
+    while True:
+        await asyncio.sleep(QR_SCAN_INTERVAL_SEC)
+        try:
+            resp = await client().get(f"{CAMERA_URL}/frame", timeout=3.0)
+            if resp.status_code != 200:
+                continue
+            image_bytes = resp.content
 
-    def _draw_ai_panel(
-        self, canvas: np.ndarray, snap: _StateSnapshot, x: int, y: int
-    ) -> None:
-        ai = snap.ai_status
-        pw, ph = 250, 152
+            def _decode():
+                nparr = np.frombuffer(image_bytes, np.uint8)
+                frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                return qr_decode(frame) if frame is not None else []
 
-        self._panel_bg(canvas, x, y, pw, ph)
-        self._header(canvas, "[+] AI STATUS", x + 10, y + 22)
+            results = await loop.run_in_executor(None, _decode)
+            if not results:
+                continue
 
-        rows = [
-            ("Inference",
-             "Ready" if ai.inference_ready else "Offline",
-             C_OK if ai.inference_ready else C_ERR),
-            ("FPS",
-             f"{ai.fps:.1f}",
-             C_OK if ai.fps > 15 else C_WARN),
-            ("NPU Temp",
-             f"{ai.npu_temp_celsius:.1f}°C" if ai.npu_temp_celsius else "N/A",
-             _temp_color(ai.npu_temp_celsius)),
-            ("Thermal",
-             ai.thermal_status.capitalize(),
-             C_OK if ai.thermal_status == "normal" else
-             C_WARN if ai.thermal_status == "warning" else C_ERR),
-        ]
-        for i, (label, value, color) in enumerate(rows):
-            ry = y + 48 + i * 26
-            cv2.circle(canvas, (x + 16, ry - 5), 5, color, -1, cv2.LINE_AA)
-            cv2.putText(canvas, label, (x + 28, ry),
-                        FONT_SMALL, 0.48, C_GRAY, 1, cv2.LINE_AA)
-            cv2.putText(canvas, value, (x + 140, ry),
-                        FONT_SMALL, 0.50, C_WHITE, 1, cv2.LINE_AA)
+            qr_data = results[0].data.decode("utf-8").strip()
+            now = time.monotonic()
+            if qr_data == last_scanned_qr and now - last_trigger_time < 3.0:
+                continue
 
-    # ── NETWORK 패널 (우상단) ─────────────────────────────────────────────────
+            last_scanned_qr = qr_data
+            last_trigger_time = now
 
-    def _draw_network_panel(
-        self, canvas: np.ndarray, snap: _StateSnapshot, x: int, y: int
-    ) -> None:
-        net = snap.network_status
-        pw, ph = 240, 126
+            if _pending_preset is None:
+                # No preset loaded yet — request Firebase to load current set
+                logger.info("QR detected but no preset — requesting current set from Firebase")
+                try:
+                    await client().post(f"{FIREBASE_SYNC_URL}/load_current_set", timeout=3.0)
+                    await asyncio.sleep(1.5)  # wait for firebase → gateway/job to propagate
+                except Exception:
+                    pass
 
-        self._panel_bg(canvas, x, y, pw, ph)
-        self._header(canvas, "[+] NETWORK", x + 10, y + 22)
-
-        rows = [
-            ("Gateway",   net.gateway),
-            ("Inference", net.inference),
-            ("Camera",    net.camera),
-        ]
-        for i, (label, online) in enumerate(rows):
-            ry = y + 50 + i * 26
-            color = C_OK if online else C_ERR
-            status = "Online" if online else "Offline"
-            cv2.circle(canvas, (x + 16, ry - 5), 5, color, -1, cv2.LINE_AA)
-            cv2.putText(canvas, label, (x + 28, ry),
-                        FONT_SMALL, 0.48, C_GRAY, 1, cv2.LINE_AA)
-            cv2.putText(canvas, status, (x + 130, ry),
-                        FONT_SMALL, 0.50, C_WHITE, 1, cv2.LINE_AA)
-
-    # ── DATA INFO 패널 (TRAY INFO 바로 위) ───────────────────────────────────
-
-    def _draw_data_panel(
-        self, canvas: np.ndarray, snap: _StateSnapshot, x: int, y: int
-    ) -> None:
-        if snap.scan_info is None:
-            return
-        si = snap.scan_info
-        targets = [(k, v) for k, v in si.target.items() if v > 0]
-        ROW_H = 26
-        pw = 310
-        ph = 62 + max(1, len(targets)) * ROW_H
-
-        ch = canvas.shape[0]
-        y = min(y, ch - ph - 8)
-
-        self._panel_bg(canvas, x, y, pw, ph)
-        self._header(canvas, "[+] DATA INFO", x + 10, y + 22)
-
-        # Job ID + scan time on one line
-        job_display = si.job_id if len(si.job_id) <= 20 else si.job_id[:17] + "..."
-        scan_str = si.scanned_at if si.scanned_at else "waiting..."
-        cv2.putText(canvas, f"{job_display}   {scan_str}", (x + 12, y + 44),
-                    FONT_SMALL, 0.42, C_GRAY, 1, cv2.LINE_AA)
-
-        # Target class rows
-        if not targets:
-            cv2.putText(canvas, "No targets", (x + 12, y + 44 + ROW_H),
-                        FONT_SMALL, 0.44, C_GRAY, 1, cv2.LINE_AA)
-        else:
-            for i, (cls, cnt) in enumerate(targets):
-                ry = y + 44 + (i + 1) * ROW_H
-                cv2.putText(canvas, cls, (x + 12, ry),
-                            FONT_SMALL, 0.44, C_WHITE, 1, cv2.LINE_AA)
-                cv2.putText(canvas, f"x {cnt}", (x + 262, ry),
-                            FONT_SMALL, 0.48, C_WARN, 1, cv2.LINE_AA)
-
-    # ── TRAY INFO 패널 (좌하단) ───────────────────────────────────────────────
-
-    def _draw_tray_panel(
-        self, canvas: np.ndarray, snap: _StateSnapshot, x: int, y: int
-    ) -> None:
-        items = snap.tray_items
-        row_h = 28
-        ph = 52 + len(items) * row_h + 34   # 동적 높이
-        pw = 310
-
-        # y 위치가 캔버스 밖으로 나가지 않도록 보정
-        h = canvas.shape[0]
-        y = min(y, h - ph - 8)
-
-        self._panel_bg(canvas, x, y, pw, ph)
-        self._header(canvas, "[+] TRAY INFO", x + 10, y + 22)
-
-        if not items:
-            cv2.putText(canvas, "No objects detected", (x + 12, y + 50),
-                        FONT_SMALL, 0.45, C_GRAY, 1, cv2.LINE_AA)
-            return
-
-        for i, item in enumerate(items):
-            ry = y + 46 + i * row_h
-            # device_name 있으면 우선 표시, 없으면 class_name 표시
-            display_name = item.device_name if item.device_name else item.class_name
-            # FDA 등급 배지 (있을 때만)
-            if item.fda_class:
-                badge = f"[{item.fda_class}]"
-                cv2.putText(canvas, badge, (x + 12, ry),
-                            FONT_SMALL, 0.40, C_GRAY, 1, cv2.LINE_AA)
-                cv2.putText(canvas, display_name, (x + 40, ry),
-                            FONT_SMALL, 0.46, C_WHITE, 1, cv2.LINE_AA)
+            if _pending_preset:
+                job = dict(_pending_preset)
+                job["scan_info"] = {**job["scan_info"], "scanned_at": datetime.now().strftime("%H:%M:%S")}
+                _pending_preset = None
+                current_job = job
+                current_state = SystemState.READY
+                mismatch_start_time = None
+                logger.info("QR detected → detection started: id=%r target=%s", job["id"], job["target"])
             else:
-                cv2.putText(canvas, display_name, (x + 12, ry),
-                            FONT_SMALL, 0.46, C_WHITE, 1, cv2.LINE_AA)
-            cv2.putText(canvas, f"x {item.count}", (x + 262, ry),
-                        FONT_SMALL, 0.50, C_OK, 1, cv2.LINE_AA)
+                logger.warning("QR detected but no preset available from Firebase — ignoring scan")
+                continue
 
-        # 구분선 + 합계
-        sep_y = y + 46 + len(items) * row_h + 4
-        cv2.line(canvas, (x + 10, sep_y), (x + pw - 10, sep_y), C_PANEL_BORDER, 1)
-        total = sum(i.count for i in items)
-        cv2.putText(canvas, "Total", (x + 12, sep_y + 20),
-                    FONT_SMALL, 0.50, C_GRAY, 1, cv2.LINE_AA)
-        cv2.putText(canvas, f"{total} pcs", (x + 240, sep_y + 20),
-                    FONT_SMALL, 0.52, C_WARN, 1, cv2.LINE_AA)
+            await client().post(
+                f"{DISPLAY_URL}/hud",
+                json={
+                    "border_color": "yellow",
+                    "tray_items": [],
+                    "scan_info": current_job["scan_info"],
+                    "flash_text": "QR SCANNED",
+                    "center_text": "",
+                },
+                timeout=HEALTH_TIMEOUT,
+            )
+        except Exception as e:
+            logger.debug("QR loop error: %s", e)
 
-    # ── 매칭 상태 텍스트 (상단 중앙) ─────────────────────────────────────────
 
-    @staticmethod
-    def _draw_status_text(canvas: np.ndarray, snap: _StateSnapshot) -> None:
-        target = snap.target_border_color
-        if target == BorderColor.GREEN:
-            text, color = "YES MATCH", C_OK
-        elif target == BorderColor.RED:
-            text, color = "NO MATCH", C_ERR
+async def _display_frame_loop() -> None:
+    """Send camera frames to display_agent at 20 FPS (decoupled from inference loop)."""
+    INTERVAL = 0.05  # 20 FPS
+    logger.info("Display frame loop started (20 FPS)")
+    while True:
+        await asyncio.sleep(INTERVAL)
+        if not camera_active or not display_active:
+            continue
+        try:
+            resp = await client().get(f"{CAMERA_URL}/frame", timeout=2.0)
+            if resp.status_code != 200:
+                continue
+            image_b64 = base64.b64encode(resp.content).decode("utf-8")
+            await client().post(
+                f"{DISPLAY_URL}/frame",
+                json={"image_b64": image_b64, "detections": _latest_tracked_dets},
+                timeout=1.0,
+            )
+        except Exception:
+            pass
+
+
+async def _counting_loop() -> None:
+    """Background real-time counting loop (active only when a job is set).
+
+    Thermal throttling (uses max of NPU and CPU temps — whichever is hotter):
+      Normal   (< 60°C): 12 FPS (0.08s interval)
+      Warm   (60-70°C):  5 FPS  (0.2s interval)
+      Hot    (70-78°C):  2 FPS  (0.5s interval)
+      Critical (> 78°C): inference fully paused (10s cooldown loop)
+
+    Temperature is sampled at the TOP of each cycle so throttle decisions
+    are always based on current readings, not last cycle's stale data.
+    """
+    global current_state, mismatch_start_time, _tracked_detections, last_scanned_qr, _match_achieved_at, _error_achieved_at, current_job, _pending_preset, _latest_tracked_dets
+    logger.info("Counting loop started (thermal-aware throttling enabled)")
+
+    TEMP_NORMAL = 65.0
+    TEMP_WARM = 75.0
+    TEMP_HOT = 82.0
+
+    INTERVAL_NORMAL = 0.08
+    INTERVAL_WARM = 0.2
+    INTERVAL_HOT = 0.5
+    INTERVAL_CRITICAL = 10.0
+
+    _last_npu_temp: float = 0.0
+    _last_cpu_temp: float = 0.0
+    _fps_counter = 0
+    _fps_start = time.monotonic()
+
+    while True:
+        if not camera_active:
+            await asyncio.sleep(1.0)
+            continue
+
+        if not inference_running or not current_job:
+            await asyncio.sleep(0.5)
+            continue
+
+        # Read temps at top of cycle — throttle decision uses current readings
+        try:
+            metrics = await _fetch_json(f"{INFERENCE_URL}/metrics")
+            _last_npu_temp = float(metrics.get("npu_temp_celsius") or 0.0)
+        except Exception:
+            pass
+        _last_cpu_temp = float(_read_cpu_temp() or 0.0)
+        peak_temp = max(_last_npu_temp, _last_cpu_temp)
+
+        start_time = time.monotonic()
+
+        if peak_temp >= TEMP_HOT:
+            logger.warning(
+                "CRITICAL temp — NPU=%.1f°C CPU=%.1f°C — pausing inference for %.0fs",
+                _last_npu_temp, _last_cpu_temp, INTERVAL_CRITICAL,
+            )
+            await asyncio.sleep(INTERVAL_CRITICAL)
+            continue
+        elif peak_temp >= TEMP_WARM:
+            target_interval = INTERVAL_HOT
+        elif peak_temp >= TEMP_NORMAL:
+            target_interval = INTERVAL_WARM
         else:
-            return  # yellow = standby, no text
+            target_interval = INTERVAL_NORMAL
 
-        h, w = canvas.shape[:2]
-        scale, thickness = 2.2, 3
-        (tw, th), _ = cv2.getTextSize(text, FONT, scale, thickness)
-        x = (w - tw) // 2
-        y = 90
-        # semi-transparent background
-        pad = 20
-        roi = canvas[y - th - pad: y + pad, x - pad: x + tw + pad]
-        dark = np.zeros_like(roi)
-        cv2.addWeighted(dark, 0.55, roi, 0.45, 0, roi)
-        canvas[y - th - pad: y + pad, x - pad: x + tw + pad] = roi
-        cv2.putText(canvas, text, (x, y), FONT, scale, color, thickness, cv2.LINE_AA)
+        try:
+            resp = await client().get(f"{CAMERA_URL}/frame", timeout=3.0)
+            if resp.status_code != 200:
+                await asyncio.sleep(0.5); continue
+            image_bytes = resp.content
 
-    # ── QR 플래시 배너 (하단 중앙, 3초 표시) ────────────────────────────────
+            image_b64 = base64.b64encode(image_bytes).decode("utf-8")
 
-    @staticmethod
-    def _draw_flash_banner(canvas: np.ndarray, text: str) -> None:
-        h, w = canvas.shape[:2]
-        scale, thickness = 1.4, 2
-        (tw, th), _ = cv2.getTextSize(text, FONT, scale, thickness)
-        x = (w - tw) // 2
-        y = h - 55
-        pad = 16
-        y1, y2 = max(0, y - th - pad), min(h, y + pad)
-        x1, x2 = max(0, x - pad), min(w, x + tw + pad)
-        roi = canvas[y1:y2, x1:x2]
-        dark = np.zeros_like(roi)
-        cv2.addWeighted(dark, 0.65, roi, 0.35, 0, roi)
-        canvas[y1:y2, x1:x2] = roi
-        cv2.putText(canvas, text, (x, y), FONT, scale, C_WARN, thickness, cv2.LINE_AA)
+            inf_resp = await client().post(
+                f"{INFERENCE_URL}{INFERENCE_ENDPOINT}",
+                files={"image": ("image.jpg", image_bytes, "image/jpeg")},
+                timeout=GATEWAY_TIMEOUT
+            )
+            if inf_resp.status_code != 200:
+                await asyncio.sleep(0.5); continue
+            
+            data = _normalize_inference_response(inf_resp.json())
+            raw_dets = data.get("detections", [])
 
-    # ── 테두리 (색상 보간) ────────────────────────────────────────────────────
+            tracked_dets = _tracker.update(raw_dets)
+            if not tracked_dets and raw_dets:
+                tracked_dets = _smooth_detections(raw_dets, _tracked_detections)
+            _tracked_detections = tracked_dets
 
-    @staticmethod
-    def _draw_border(canvas: np.ndarray, snap: _StateSnapshot) -> None:
-        h, w = canvas.shape[:2]
-        color = get_border_bgr(snap)
-        t = BORDER_THICKNESS
-        # 사각형 4변을 두꺼운 선으로 그림 (rectangle의 음수 두께는 채우기라 사용 안 함)
-        cv2.rectangle(canvas, (t // 2, t // 2), (w - t // 2, h - t // 2),
-                      color, t, cv2.LINE_AA)
+            actual_counts = _tracker.get_counts()
 
-    # ── 공통 헬퍼 ─────────────────────────────────────────────────────────────
+            target_counts = current_job.get("target", {})
+            is_match = bool(target_counts) and all(
+                actual_counts.get(key, 0) == expected
+                for key, expected in target_counts.items()
+            )
 
-    @staticmethod
-    def _panel_bg(
-        canvas: np.ndarray, x: int, y: int, w: int, h: int
-    ) -> None:
-        """반투명 어두운 패널 배경."""
-        roi = canvas[y: y + h, x: x + w]
-        dark = np.full_like(roi, C_PANEL)
-        cv2.addWeighted(dark, PANEL_ALPHA, roi, 1 - PANEL_ALPHA, 0, roi)
-        canvas[y: y + h, x: x + w] = roi
-        cv2.rectangle(canvas, (x, y), (x + w, y + h), C_PANEL_BORDER, 1)
+            enriched_items = await _enrich_with_device_info(actual_counts)
+            global latest_detections
+            latest_detections = enriched_items
 
-    @staticmethod
-    def _header(canvas: np.ndarray, text: str, x: int, y: int) -> None:
-        cv2.putText(canvas, text, (x, y), FONT_SMALL, 0.55,
-                    C_HEADER, 1, cv2.LINE_AA)
+            HOLD_SEC = 2.0
+
+            if is_match:
+                if current_state != SystemState.MATCH:
+                    last_scanned_qr = None
+                    _match_achieved_at = time.monotonic()
+                    asyncio.create_task(_log_inspection_round("YES MATCH", enriched_items))
+                current_state = SystemState.MATCH
+                mismatch_start_time = None
+                if _match_achieved_at and time.monotonic() - _match_achieved_at >= HOLD_SEC:
+                    logger.info("YES MATCH held %.0fs — advancing to next set", HOLD_SEC)
+                    current_job = None
+                    _pending_preset = None
+                    current_state = SystemState.READY
+                    mismatch_start_time = None
+                    _match_achieved_at = None
+                    last_scanned_qr = None
+                    _tracker.reset()
+                    asyncio.create_task(_advance_to_next_set())
+                    continue
+            else:
+                _match_achieved_at = None
+                if current_state == SystemState.MATCH:
+                    current_state = SystemState.READY
+                if actual_counts:
+                    if current_state != SystemState.ERROR:
+                        # First NO MATCH: show result and trigger snapshot immediately
+                        current_state = SystemState.ERROR
+                        _error_achieved_at = time.monotonic()
+                        last_scanned_qr = None
+                        asyncio.create_task(_trigger_snapshot(enriched_items))
+                        asyncio.create_task(_log_inspection_round("NO MATCH", enriched_items))
+                    elif _error_achieved_at and time.monotonic() - _error_achieved_at >= HOLD_SEC:
+                        logger.info("NO MATCH held %.0fs — advancing to next set", HOLD_SEC)
+                        current_job = None
+                        _pending_preset = None
+                        current_state = SystemState.READY
+                        mismatch_start_time = None
+                        _error_achieved_at = None
+                        last_scanned_qr = None
+                        _tracker.reset()
+                        asyncio.create_task(_advance_to_next_set())
+                        continue
+                else:
+                    mismatch_start_time = None
+
+            border_color = {"READY": "yellow", "MATCH": "green", "ERROR": "red"}.get(current_state, "yellow")
+            tray_items = enriched_items
+
+            _fps_counter += 1
+            fps_elapsed = time.monotonic() - _fps_start
+            current_fps = _fps_counter / fps_elapsed if fps_elapsed > 0 else 0.0
+            if fps_elapsed >= 5.0:
+                _fps_counter = 0
+                _fps_start = time.monotonic()
+
+            global _latest_tracked_dets
+            _latest_tracked_dets = tracked_dets
+
+            if display_active:
+                inf_ready = True
+                try:
+                    inf_ready = metrics.get("inference_ready", True)
+                except Exception:
+                    pass
+
+                if peak_temp >= TEMP_HOT:
+                    thermal_str = "critical"
+                elif peak_temp >= TEMP_WARM:
+                    thermal_str = "warning"
+                else:
+                    thermal_str = "normal"
+
+                npu_temp = _last_npu_temp if _last_npu_temp > 0 else None
+                cpu_temp = _last_cpu_temp if _last_cpu_temp > 0 else None
+
+                hud_payload: dict = {
+                    "border_color": border_color,
+                    "tray_items": tray_items,
+                    "ai_status": {
+                        "inference_ready": inf_ready,
+                        "fps": round(current_fps, 1),
+                        "npu_temp_celsius": npu_temp,
+                        "cpu_temp_celsius": cpu_temp,
+                        "thermal_status": thermal_str,
+                    },
+                }
+                if current_job and current_job.get("scan_info"):
+                    hud_payload["scan_info"] = current_job["scan_info"]
+                await client().post(
+                    f"{DISPLAY_URL}/hud",
+                    json=hud_payload,
+                    timeout=HEALTH_TIMEOUT,
+                )
+        except Exception as e:
+            logger.error("Counting loop error: %s", e)
+            await asyncio.sleep(1.0); continue
+
+        elapsed = time.monotonic() - start_time
+        await asyncio.sleep(max(0.05, target_interval - elapsed))
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 유틸
-# ─────────────────────────────────────────────────────────────────────────────
+async def _enrich_with_device_info(
+    actual_counts: dict[str, int],
+) -> list[dict]:
+    """Query Device Master Agent for FDA device info in parallel. Fail-open."""
+    labels = list(actual_counts.keys())
+    if not labels:
+        return []
 
-def _temp_color(temp: float | None) -> tuple[int, int, int]:
-    if temp is None:
-        return C_GRAY
-    if temp >= 90:
-        return C_ERR
-    if temp >= 80:
-        return C_WARN
-    return C_OK
+    async def _lookup(label: str) -> dict:
+        fallback = {"class_name": label, "count": actual_counts[label]}
+        try:
+            resp = await client().get(
+                f"{DEVICE_MASTER_URL}/device/lookup",
+                params={"label": label},
+                timeout=0.5,
+            )
+            if resp.status_code == 200:
+                d = resp.json()
+                return {
+                    "class_name": label,
+                    "count": actual_counts[label],
+                    "device_name": d.get("device_name"),
+                    "product_code": d.get("product_code"),
+                    "fda_class": d.get("device_class"),
+                }
+        except Exception:
+            pass
+        return fallback
+
+    results = await asyncio.gather(*[_lookup(l) for l in labels], return_exceptions=True)
+    return [r if isinstance(r, dict) else {"class_name": labels[i], "count": actual_counts[labels[i]]}
+            for i, r in enumerate(results)]
+
+
+async def _startup_qr_prompt() -> None:
+    """Show 'Scan QR code' prompt after all containers have had time to start."""
+    await asyncio.sleep(10.0)
+    try:
+        await client().post(
+            f"{DISPLAY_URL}/hud",
+            json={
+                "border_color": "yellow",
+                "tray_items": [],
+                "center_text": "Por favor, escaneie o codigo QR",
+            },
+            timeout=HEALTH_TIMEOUT,
+        )
+        logger.info("Startup QR prompt sent to display")
+    except Exception as exc:
+        logger.debug("Startup QR prompt failed: %s", exc)
+
+
+async def _advance_to_next_set() -> None:
+    """Reset display to yellow and request next set transition from Firebase Sync."""
+    try:
+        await client().post(
+            f"{DISPLAY_URL}/hud",
+            json={
+                "border_color": "yellow",
+                "tray_items": [],
+                "center_text": "Por favor, escaneie o codigo QR",
+            },
+            timeout=HEALTH_TIMEOUT,
+        )
+    except Exception:
+        pass
+    try:
+        await client().post(f"{FIREBASE_SYNC_URL}/advance_set", timeout=5.0)
+        logger.info("advance_set requested — next preset set incoming")
+    except Exception as exc:
+        logger.debug("advance_set error: %s", exc)
+
+
+async def _log_inspection_round(result: str, detected_items: list[dict]) -> None:
+    """Log YES MATCH / NO MATCH result to Firestore 5-slot circular buffer."""
+    if not current_job:
+        return
+    try:
+        scan_info = current_job.get("scan_info", {})
+        round_data = {
+            "job_id": current_job.get("id", ""),
+            "scanned_at": scan_info.get("scanned_at", ""),
+            "target": current_job.get("target", {}),
+            "detected": {d["class_name"]: d["count"] for d in detected_items if "class_name" in d},
+            "result": result,
+        }
+        await client().post(f"{FIREBASE_SYNC_URL}/log_round", json=round_data, timeout=3.0)
+    except Exception as exc:
+        logger.debug("log_inspection_round error: %s", exc)
+
+
+async def _trigger_snapshot(devices_resolved: list[dict] | None = None):
+    if not current_job: return
+    try:
+        body: dict = {"job_id": current_job.get("id"), "reason": "timeout_mismatch"}
+        if devices_resolved:
+            body["devices_resolved"] = devices_resolved
+        await client().post(f"{FIREBASE_SYNC_URL}/snap", json=body, timeout=3.0)
+    except: pass
+
+
+class ControlRequest(BaseModel):
+    inference_running: bool | None = None
+    camera_active: bool | None = None
+    display_active: bool | None = None
+
+
+@app.post("/control", summary="System control toggles (inference, camera, display)")
+async def update_controls(req: ControlRequest):
+    global inference_running, camera_active, display_active
+    if req.inference_running is not None:
+        inference_running = req.inference_running
+    if req.camera_active is not None:
+        camera_active = req.camera_active
+    if req.display_active is not None:
+        display_active = req.display_active
+
+    logger.info("Controls updated: inference=%s, camera=%s, display=%s",
+                inference_running, camera_active, display_active)
+
+    return {
+        "status": "updated",
+        "inference_running": inference_running,
+        "camera_active": camera_active,
+        "display_active": display_active
+    }
+
+
+@app.post("/job/start", summary="Resume inference loop (legacy)")
+async def start_inference():
+    global inference_running
+    inference_running = True
+    logger.info("Inference loop started by legacy control command")
+    return {"status": "started", "inference_running": True}
+
+
+@app.post("/job/stop", summary="Pause inference loop (legacy)")
+async def stop_inference():
+    global inference_running
+    inference_running = False
+    logger.info("Inference loop stopped by legacy control command")
+    return {"status": "stopped", "inference_running": False}
+
+
+@app.get("/job/status", summary="Inference loop and system state")
+async def job_status():
+    return {
+        "inference_running": inference_running,
+        "camera_active": camera_active,
+        "display_active": display_active,
+        "current_job": current_job,
+        "system_state": current_state,
+        "latest_detections": latest_detections,
+    }
+
+
+@app.get("/health")
+async def health_check() -> JSONResponse:
+    inference_health = await _fetch_module_health(INFERENCE_URL, "inference_agent")
+    camera_health = await _fetch_module_health(CAMERA_URL, "camera_agent")
+    all_healthy = inference_health["reachable"] and camera_health["reachable"]
+    return JSONResponse(status_code=200, content={"status": "healthy" if all_healthy else "degraded", "modules": {"inference": inference_health, "camera": camera_health}})
+
+
+@app.get("/status")
+async def status_check() -> JSONResponse:
+    inf_h, inf_m, cam_h = await asyncio.gather(_fetch_json(f"{INFERENCE_URL}/health"), _fetch_json(f"{INFERENCE_URL}/metrics"), _fetch_json(f"{CAMERA_URL}/health"))
+    return JSONResponse(content={"gateway": "healthy", "inference": {"health": inf_h, "metrics": inf_m}, "camera": cam_h})
+
+
+def _read_cpu_temp() -> float | None:
+    try:
+        with open("/sys/class/thermal/thermal_zone0/temp") as f:
+            return float(f.read().strip()) / 1000.0
+    except (FileNotFoundError, ValueError, OSError):
+        return None
+
+
+async def _fetch_module_health(base_url: str, name: str) -> dict[str, Any]:
+    try:
+        resp = await client().get(f"{base_url}/health", timeout=3.0)
+        data = resp.json()
+        data["reachable"] = resp.status_code == 200
+        return data
+    except: return {"reachable": False, "status": "unreachable"}
+
+
+async def _fetch_json(url: str) -> dict[str, Any]:
+    try:
+        resp = await client().get(url, timeout=3.0)
+        return resp.json()
+    except: return {"error": "unreachable"}
+
+
+def _normalize_inference_response(data: dict) -> dict:
+    """Adapter pattern to normalize 3rd party AI response schemas."""
+    # Check if this is the mock 3rd-party schema
+    if "success" in data and "items" in data:
+        normalized_detections = []
+        for i, item in enumerate(data.get("items", [])):
+            normalized_detections.append({
+                "class_id": i,
+                "class_name": item.get("label", "unknown"),
+                "confidence": item.get("score", 0.0),
+                "bbox": item.get("box", [0,0,0,0])
+            })
+        return {
+            "detections": normalized_detections,
+            "inference_time_ms": data.get("processing_time_ms", 0.0),
+            "npu_temp_celsius": data.get("device_temp_c", 0.0),
+            "thermal_status": "normal"
+        }
+    return data # Return native system schema untouched
+
+
+if __name__ == "__main__":
+    uvicorn.run("src.gateway.main:app", host="0.0.0.0", port=8000, log_level="info")

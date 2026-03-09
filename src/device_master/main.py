@@ -1,17 +1,17 @@
 """
 main.py — Device Master Agent (Port 8005)
 
-Caches openFDA Device Classification API data and provides
-YOLO detection label → FDA standard device info lookup.
+Fetches device catalog from Digioptics Firebase (Application DB) and provides
+YOLO detection label → standard device info lookup.
 
-In production, replace this container by pointing DEVICE_MASTER_URL
-to the hospital's internal MDM server — no other architecture changes needed.
+The Edge Device is fully decoupled from hospital-internal networks.
+All device data flows: Digioptics Cloud DB → Firebase → this agent → Gateway.
 
 Endpoints:
   GET  /health                — module status + cache info
-  GET  /device/lookup?label=  — single label FDA info lookup
+  GET  /device/lookup?label=  — single label info lookup
   GET  /device/labels         — full cache list
-  POST /device/refresh        — force openFDA re-fetch
+  POST /device/refresh        — force Firebase re-fetch
 """
 
 from __future__ import annotations
@@ -36,13 +36,11 @@ logging.basicConfig(
 logger = logging.getLogger("device_master.main")
 
 MODULE_NAME = os.getenv("MODULE_NAME", "DeviceMasterAgent")
-HOSPITAL_API_URL = os.getenv("HOSPITAL_API_URL", "").rstrip("/")
-HOSPITAL_API_KEY = os.getenv("HOSPITAL_API_KEY", "")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    logger.info("Device Master Agent starting — building cache from openFDA...")
+    logger.info("Device Master Agent starting — building cache from Firebase catalog...")
     await cache.build()
     logger.info("Cache ready: %d labels", len(cache.all_entries()))
     yield
@@ -52,8 +50,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 app = FastAPI(
     title="Device Master Agent API",
     description=(
-        "Surgical instrument standard info lookup via openFDA. "
-        "Swap DEVICE_MASTER_URL to point at a real hospital MDM system."
+        "Surgical instrument info lookup via Digioptics Firebase catalog. "
+        "Edge device is fully decoupled from hospital-internal networks."
     ),
     version="1.0.0",
     lifespan=lifespan,
@@ -66,7 +64,7 @@ app = FastAPI(
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check() -> HealthResponse:
-    reachable = await _check_openfda()
+    reachable = await _check_firebase()
     return HealthResponse(
         status="healthy" if cache.is_loaded() else "degraded",
         module=MODULE_NAME,
@@ -74,7 +72,7 @@ async def health_check() -> HealthResponse:
             loaded=cache.is_loaded(),
             label_count=len(cache.all_entries()),
             cache_age_hours=cache.cache_age_hours(),
-            openfda_reachable=reachable,
+            firebase_reachable=reachable,
         ),
     )
 
@@ -82,27 +80,19 @@ async def health_check() -> HealthResponse:
 @app.get(
     "/device/lookup",
     response_model=DeviceLookupResponse,
-    summary="YOLO label → FDA device info lookup",
+    summary="YOLO label → device info lookup",
 )
 async def lookup_device(label: str) -> DeviceLookupResponse:
     """
     label: YOLO detection label (e.g. "forceps", "scalpel")
     - Cache hit: return immediately (data_source="cache")
-    - Cache miss: attempt live openFDA query (data_source="openfda_live")
-    - Query failure: labels.json fallback or 404
+    - Cache miss: labels.json fallback or 404
     """
     normalized = label.lower().strip()
 
     entry = cache.get(normalized)
     if entry is not None:
         return entry
-
-    if HOSPITAL_API_URL:
-        hospital_entry = await _fetch_from_hospital_api(normalized)
-        if hospital_entry is not None:
-            cache.set(normalized, hospital_entry)
-            logger.info("Hospital API hit: %r → %s", normalized, hospital_entry.device_name)
-            return hospital_entry
 
     logger.info("Cache miss for label=%r — using local fallback", normalized)
     from src.device_master.cache import _load_labels_json
@@ -138,7 +128,7 @@ async def list_labels() -> JSONResponse:
 @app.post(
     "/device/refresh",
     status_code=status.HTTP_202_ACCEPTED,
-    summary="Force openFDA re-fetch",
+    summary="Force Firebase re-fetch",
 )
 async def refresh_cache() -> JSONResponse:
     logger.info("Cache refresh requested")
@@ -153,41 +143,12 @@ async def refresh_cache() -> JSONResponse:
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def _fetch_from_hospital_api(label: str) -> DeviceLookupResponse | None:
+async def _check_firebase() -> bool:
+    """Check if Firebase (Digioptics Application DB) is reachable."""
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
-            resp = await client.post(
-                f"{HOSPITAL_API_URL}/instruments/lookup",
-                json={"labels": [label]},
-                headers={"X-API-Key": HOSPITAL_API_KEY},
-            )
-        if resp.status_code != 200:
-            logger.warning("Hospital API returned %d for label=%r", resp.status_code, label)
-            return None
-        match = resp.json().get("matches", {}).get(label)
-        if not match:
-            return None
-        return DeviceLookupResponse(
-            yolo_label=label,
-            device_name=match["name"],
-            product_code=match.get("catalog_id"),
-            device_class=match.get("device_class"),
-            medical_specialty=match.get("tray_location"),
-            data_source="hospital_api",
-        )
-    except Exception as exc:
-        logger.warning("Hospital API unreachable for label=%r: %s", label, exc)
-        return None
-
-
-async def _check_openfda() -> bool:
-    try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            resp = await client.get(
-                "https://api.fda.gov/device/classification.json",
-                params={"search": 'device_name:"forceps"', "limit": "1"},
-            )
-            return resp.status_code == 200
+            resp = await client.get("https://firestore.googleapis.com/")
+            return resp.status_code in (200, 400, 404)  # any HTTP response = reachable
     except Exception:
         return False
 

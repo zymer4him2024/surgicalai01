@@ -475,6 +475,50 @@ async def advance_set() -> JSONResponse:
 
 
 @app.post(
+    "/load_current_set",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Load current preset set and send to Gateway (no cursor advance)",
+)
+async def load_current_set() -> JSONResponse:
+    asyncio.create_task(_do_load_current_set())
+    return JSONResponse({"status": "loading"})
+
+
+async def _do_load_current_set() -> None:
+    """Read current Firestore preset set (without advancing cursor) and send to Gateway."""
+    if _uploader.simulation_mode:
+        return
+    db = getattr(_uploader, "_db", None)
+    if db is None:
+        return
+    try:
+        import datetime as dt
+        loop = asyncio.get_event_loop()
+        doc_snap = await loop.run_in_executor(
+            None,
+            lambda: db.collection("job_config").document("rpi").get(),
+        )
+        if not doc_snap.exists:
+            return
+        data = doc_snap.to_dict()
+        sets = data.get("sets")
+        if sets:
+            cursor = int(data.get("cursor", 0)) % len(sets)
+            target = sets[cursor]
+            job_id = f"SET{cursor + 1}-{dt.datetime.utcnow().strftime('%H%M%S')}"
+        else:
+            target = data.get("target", {})
+            job_id = f"JOB-{dt.datetime.utcnow().strftime('%H%M%S')}"
+        if not target:
+            return
+        async with httpx.AsyncClient(timeout=3.0) as http:
+            await http.post(f"{GATEWAY_URL}/job", json={"job_id": job_id, "target": target})
+        logger.info("Current set loaded → gateway/job: job_id=%s target=%s", job_id, target)
+    except Exception as exc:
+        logger.debug("_do_load_current_set error: %s", exc)
+
+
+@app.post(
     "/snap",
     status_code=status.HTTP_202_ACCEPTED,
     summary="Trigger immediate ERROR state snapshot capture",

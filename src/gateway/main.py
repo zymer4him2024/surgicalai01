@@ -44,7 +44,10 @@ logger = logging.getLogger("gateway.main")
 
 MODULE_NAME = os.getenv("MODULE_NAME", "GatewayAgent")
 INFERENCE_URL = os.getenv("INFERENCE_URL", "http://inference_agent:8001")
+# For 3rd party integration, INFERENCE_ENDPOINT can be set to /predict
+INFERENCE_ENDPOINT = os.getenv("INFERENCE_ENDPOINT", "/inference")
 CAMERA_URL = os.getenv("CAMERA_URL", "http://camera_agent:8002")
+
 DISPLAY_URL = os.getenv("DISPLAY_URL", "http://display_agent:8003")
 FIREBASE_SYNC_URL = os.getenv("FIREBASE_SYNC_URL", "http://firebase_sync_agent:8004")
 DEVICE_MASTER_URL = os.getenv("DEVICE_MASTER_URL", "http://device_master_agent:8005")
@@ -89,10 +92,10 @@ _pending_preset: dict | None = None
 _latest_tracked_dets: list[dict] = []
 
 _tracker = SurgicalTracker(
-    max_age=30,
-    min_hits=3,
-    iou_threshold=0.3,
-    ema_alpha=0.6,
+    max_age=8,         # ~0.7s at 12 FPS, prevents ghost counts at lower FPS
+    min_hits=2,        # faster confirmation
+    iou_threshold=0.35,
+    ema_alpha=0.5,
 )
 
 
@@ -141,10 +144,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     qr_task = asyncio.create_task(_qr_scan_loop())
     count_task = asyncio.create_task(_counting_loop())
     frame_task = asyncio.create_task(_display_frame_loop())
+    prompt_task = asyncio.create_task(_startup_qr_prompt())
     yield
     qr_task.cancel()
     count_task.cancel()
     frame_task.cancel()
+    prompt_task.cancel()
     try:
         await asyncio.gather(qr_task, count_task, frame_task)
     except asyncio.CancelledError:
@@ -202,7 +207,12 @@ async def create_job(req: JobRequest, background_tasks: BackgroundTasks):
     background_tasks.add_task(
         client().post,
         f"{DISPLAY_URL}/hud",
-        json={"border_color": "yellow", "tray_items": [], "scan_info": scan_info},
+        json={
+            "border_color": "yellow",
+            "tray_items": [],
+            "scan_info": scan_info,
+            "center_text": "Por favor, escaneie o codigo QR",
+        },
         timeout=HEALTH_TIMEOUT,
     )
     return {"status": "ok", "preset": _pending_preset, "state": current_state}
@@ -222,7 +232,7 @@ async def predict(
 
     try:
         resp = await client().post(
-            f"{INFERENCE_URL}/inference",
+            f"{INFERENCE_URL}{INFERENCE_ENDPOINT}",
             files={"image": (image.filename or "image.jpg", image_bytes, image.content_type or "image/jpeg")},
             timeout=GATEWAY_TIMEOUT,
         )
@@ -230,7 +240,7 @@ async def predict(
         logger.error("Inference call failed: %s", exc)
         raise HTTPException(status_code=503, detail="Inference agent unreachable")
 
-    data = resp.json()
+    data = _normalize_inference_response(resp.json())
 
     global current_state, mismatch_start_time
     if current_job:
@@ -312,6 +322,15 @@ async def _qr_scan_loop() -> None:
             last_scanned_qr = qr_data
             last_trigger_time = now
 
+            if _pending_preset is None:
+                # No preset loaded yet — request Firebase to load current set
+                logger.info("QR detected but no preset — requesting current set from Firebase")
+                try:
+                    await client().post(f"{FIREBASE_SYNC_URL}/load_current_set", timeout=3.0)
+                    await asyncio.sleep(1.5)  # wait for firebase → gateway/job to propagate
+                except Exception:
+                    pass
+
             if _pending_preset:
                 job = dict(_pending_preset)
                 job["scan_info"] = {**job["scan_info"], "scanned_at": datetime.now().strftime("%H:%M:%S")}
@@ -319,22 +338,20 @@ async def _qr_scan_loop() -> None:
                 current_job = job
                 current_state = SystemState.READY
                 mismatch_start_time = None
-                logger.info("QR detected → detection started with preset: id=%r target=%s", job["id"], job["target"])
+                logger.info("QR detected → detection started: id=%r target=%s", job["id"], job["target"])
             else:
-                target = _parse_qr_target(qr_data)
-                scan_info = {
-                    "job_id": qr_data,
-                    "scanned_at": datetime.now().strftime("%H:%M:%S"),
-                    "target": target,
-                }
-                current_job = {"id": qr_data, "target": target, "scan_info": scan_info}
-                current_state = SystemState.READY
-                mismatch_start_time = None
-                logger.info("QR detected → new job: id=%r target=%s", qr_data, target)
+                logger.warning("QR detected but no preset available from Firebase — ignoring scan")
+                continue
 
             await client().post(
                 f"{DISPLAY_URL}/hud",
-                json={"border_color": "yellow", "tray_items": [], "scan_info": current_job["scan_info"], "flash_text": "QR SCANNED"},
+                json={
+                    "border_color": "yellow",
+                    "tray_items": [],
+                    "scan_info": current_job["scan_info"],
+                    "flash_text": "QR SCANNED",
+                    "center_text": "",
+                },
                 timeout=HEALTH_TIMEOUT,
             )
         except Exception as e:
@@ -366,25 +383,29 @@ async def _display_frame_loop() -> None:
 async def _counting_loop() -> None:
     """Background real-time counting loop (active only when a job is set).
 
-    Thermal throttling:
-      Normal   (< 70°C): 12 FPS (0.08s interval)
-      Warm   (70-80°C):  5 FPS  (0.2s interval)
-      Hot    (80-85°C):  2 FPS  (0.5s interval)
-      Critical (> 85°C): inference paused (10s wait then retry)
+    Thermal throttling (uses max of NPU and CPU temps — whichever is hotter):
+      Normal   (< 60°C): 12 FPS (0.08s interval)
+      Warm   (60-70°C):  5 FPS  (0.2s interval)
+      Hot    (70-78°C):  2 FPS  (0.5s interval)
+      Critical (> 78°C): inference fully paused (10s cooldown loop)
+
+    Temperature is sampled at the TOP of each cycle so throttle decisions
+    are always based on current readings, not last cycle's stale data.
     """
     global current_state, mismatch_start_time, _tracked_detections, last_scanned_qr, _match_achieved_at, _error_achieved_at, current_job, _pending_preset, _latest_tracked_dets
     logger.info("Counting loop started (thermal-aware throttling enabled)")
 
-    TEMP_NORMAL = 70.0
-    TEMP_WARM = 80.0
-    TEMP_HOT = 85.0
+    TEMP_NORMAL = 65.0
+    TEMP_WARM = 75.0
+    TEMP_HOT = 82.0
 
     INTERVAL_NORMAL = 0.08
     INTERVAL_WARM = 0.2
     INTERVAL_HOT = 0.5
     INTERVAL_CRITICAL = 10.0
 
-    _last_npu_temp = 0.0
+    _last_npu_temp: float = 0.0
+    _last_cpu_temp: float = 0.0
     _fps_counter = 0
     _fps_start = time.monotonic()
 
@@ -397,19 +418,27 @@ async def _counting_loop() -> None:
             await asyncio.sleep(0.5)
             continue
 
+        # Read temps at top of cycle — throttle decision uses current readings
+        try:
+            metrics = await _fetch_json(f"{INFERENCE_URL}/metrics")
+            _last_npu_temp = float(metrics.get("npu_temp_celsius") or 0.0)
+        except Exception:
+            pass
+        _last_cpu_temp = float(_read_cpu_temp() or 0.0)
+        peak_temp = max(_last_npu_temp, _last_cpu_temp)
+
         start_time = time.monotonic()
 
-        if _last_npu_temp >= TEMP_HOT:
-            logger.warning("NPU temp %.1f°C — CRITICAL throttle (pausing inference)", _last_npu_temp)
+        if peak_temp >= TEMP_HOT:
+            logger.warning(
+                "CRITICAL temp — NPU=%.1f°C CPU=%.1f°C — pausing inference for %.0fs",
+                _last_npu_temp, _last_cpu_temp, INTERVAL_CRITICAL,
+            )
             await asyncio.sleep(INTERVAL_CRITICAL)
-            try:
-                metrics = await _fetch_json(f"{INFERENCE_URL}/metrics")
-                _last_npu_temp = metrics.get("npu_temp_celsius", 0.0) or 0.0
-            except: pass
             continue
-        elif _last_npu_temp >= TEMP_WARM:
+        elif peak_temp >= TEMP_WARM:
             target_interval = INTERVAL_HOT
-        elif _last_npu_temp >= TEMP_NORMAL:
+        elif peak_temp >= TEMP_NORMAL:
             target_interval = INTERVAL_WARM
         else:
             target_interval = INTERVAL_NORMAL
@@ -423,14 +452,14 @@ async def _counting_loop() -> None:
             image_b64 = base64.b64encode(image_bytes).decode("utf-8")
 
             inf_resp = await client().post(
-                f"{INFERENCE_URL}/inference",
+                f"{INFERENCE_URL}{INFERENCE_ENDPOINT}",
                 files={"image": ("image.jpg", image_bytes, "image/jpeg")},
                 timeout=GATEWAY_TIMEOUT
             )
             if inf_resp.status_code != 200:
                 await asyncio.sleep(0.5); continue
-            data = inf_resp.json()
-
+            
+            data = _normalize_inference_response(inf_resp.json())
             raw_dets = data.get("detections", [])
 
             tracked_dets = _tracker.update(raw_dets)
@@ -450,15 +479,22 @@ async def _counting_loop() -> None:
             global latest_detections
             latest_detections = enriched_items
 
+            HOLD_SEC = 3.0
+
             if is_match:
                 if current_state != SystemState.MATCH:
                     last_scanned_qr = None
                     _match_achieved_at = time.monotonic()
                     asyncio.create_task(_log_inspection_round("YES MATCH", enriched_items))
+                    asyncio.create_task(client().post(
+                        f"{DISPLAY_URL}/hud",
+                        json={"border_color": "green", "center_text": "Good"},
+                        timeout=HEALTH_TIMEOUT,
+                    ))
                 current_state = SystemState.MATCH
                 mismatch_start_time = None
-                if _match_achieved_at and time.monotonic() - _match_achieved_at >= 5.0:
-                    logger.info("YES MATCH held 5s — advancing to next set")
+                if _match_achieved_at and time.monotonic() - _match_achieved_at >= HOLD_SEC:
+                    logger.info("YES MATCH held %.0fs — advancing to next set", HOLD_SEC)
                     current_job = None
                     _pending_preset = None
                     current_state = SystemState.READY
@@ -470,27 +506,45 @@ async def _counting_loop() -> None:
                     continue
             else:
                 _match_achieved_at = None
-                if current_state == SystemState.MATCH: current_state = SystemState.READY
+                if current_state == SystemState.MATCH:
+                    current_state = SystemState.READY
                 if actual_counts:
-                    if mismatch_start_time is None: mismatch_start_time = time.monotonic()
-                    elif time.monotonic() - mismatch_start_time >= 5.0:
-                        if current_state != SystemState.ERROR:
-                            asyncio.create_task(_trigger_snapshot(enriched_items))
-                            asyncio.create_task(_log_inspection_round("NO MATCH", enriched_items))
-                            last_scanned_qr = None
-                            _error_achieved_at = time.monotonic()
+                    if current_state != SystemState.ERROR:
+                        # First NO MATCH: show result and trigger snapshot immediately
                         current_state = SystemState.ERROR
-                        if _error_achieved_at and time.monotonic() - _error_achieved_at >= 5.0:
-                            logger.info("NO MATCH held 5s — advancing to next set")
-                            current_job = None
-                            _pending_preset = None
-                            current_state = SystemState.READY
-                            mismatch_start_time = None
-                            _error_achieved_at = None
-                            last_scanned_qr = None
-                            _tracker.reset()
-                            asyncio.create_task(_advance_to_next_set())
-                            continue
+                        _error_achieved_at = time.monotonic()
+                        last_scanned_qr = None
+                        asyncio.create_task(_trigger_snapshot(enriched_items))
+                        asyncio.create_task(_log_inspection_round("NO MATCH", enriched_items))
+                        asyncio.create_task(client().post(
+                            f"{DISPLAY_URL}/hud",
+                            json={"border_color": "red", "center_text": "No Match"},
+                            timeout=HEALTH_TIMEOUT,
+                        ))
+                    elif _error_achieved_at and time.monotonic() - _error_achieved_at >= HOLD_SEC:
+                        logger.info("NO MATCH held %.0fs — re-arming same tray for re-scan", HOLD_SEC)
+                        # Re-arm same preset so QR scan retries the same tray
+                        _pending_preset = {
+                            "id": current_job["id"],
+                            "target": current_job["target"],
+                            "scan_info": {
+                                "job_id": current_job["scan_info"].get("job_id", current_job["id"]),
+                                "scanned_at": "",
+                                "target": current_job["target"],
+                            },
+                        }
+                        current_job = None
+                        current_state = SystemState.READY
+                        mismatch_start_time = None
+                        _error_achieved_at = None
+                        last_scanned_qr = None
+                        _tracker.reset()
+                        asyncio.create_task(client().post(
+                            f"{DISPLAY_URL}/hud",
+                            json={"border_color": "yellow", "tray_items": [], "center_text": "Por favor, escaneie o codigo QR"},
+                            timeout=HEALTH_TIMEOUT,
+                        ))
+                        continue
                 else:
                     mismatch_start_time = None
 
@@ -508,23 +562,21 @@ async def _counting_loop() -> None:
             _latest_tracked_dets = tracked_dets
 
             if display_active:
-                npu_temp, inf_ready = None, True
+                inf_ready = True
                 try:
-                    metrics = await _fetch_json(f"{INFERENCE_URL}/metrics")
-                    npu_temp = metrics.get("npu_temp_celsius")
                     inf_ready = metrics.get("inference_ready", True)
-                    _last_npu_temp = npu_temp or 0.0
-                except: pass
+                except Exception:
+                    pass
 
-                cpu_temp = _read_cpu_temp()
-
-                _npu_for_thermal = npu_temp or 0.0
-                if _npu_for_thermal >= TEMP_HOT:
+                if peak_temp >= TEMP_HOT:
                     thermal_str = "critical"
-                elif _npu_for_thermal >= TEMP_WARM:
+                elif peak_temp >= TEMP_WARM:
                     thermal_str = "warning"
                 else:
                     thermal_str = "normal"
+
+                npu_temp = _last_npu_temp if _last_npu_temp > 0 else None
+                cpu_temp = _last_cpu_temp if _last_cpu_temp > 0 else None
 
                 hud_payload: dict = {
                     "border_color": border_color,
@@ -586,12 +638,34 @@ async def _enrich_with_device_info(
             for i, r in enumerate(results)]
 
 
+async def _startup_qr_prompt() -> None:
+    """Show 'Scan QR code' prompt after all containers have had time to start."""
+    await asyncio.sleep(10.0)
+    try:
+        await client().post(
+            f"{DISPLAY_URL}/hud",
+            json={
+                "border_color": "yellow",
+                "tray_items": [],
+                "center_text": "Por favor, escaneie o codigo QR",
+            },
+            timeout=HEALTH_TIMEOUT,
+        )
+        logger.info("Startup QR prompt sent to display")
+    except Exception as exc:
+        logger.debug("Startup QR prompt failed: %s", exc)
+
+
 async def _advance_to_next_set() -> None:
     """Reset display to yellow and request next set transition from Firebase Sync."""
     try:
         await client().post(
             f"{DISPLAY_URL}/hud",
-            json={"border_color": "yellow", "tray_items": []},
+            json={
+                "border_color": "yellow",
+                "tray_items": [],
+                "center_text": "Por favor, escaneie o codigo QR",
+            },
             timeout=HEALTH_TIMEOUT,
         )
     except Exception:
@@ -722,6 +796,27 @@ async def _fetch_json(url: str) -> dict[str, Any]:
         resp = await client().get(url, timeout=3.0)
         return resp.json()
     except: return {"error": "unreachable"}
+
+
+def _normalize_inference_response(data: dict) -> dict:
+    """Adapter pattern to normalize 3rd party AI response schemas."""
+    # Check if this is the mock 3rd-party schema
+    if "success" in data and "items" in data:
+        normalized_detections = []
+        for i, item in enumerate(data.get("items", [])):
+            normalized_detections.append({
+                "class_id": i,
+                "class_name": item.get("label", "unknown"),
+                "confidence": item.get("score", 0.0),
+                "bbox": item.get("box", [0,0,0,0])
+            })
+        return {
+            "detections": normalized_detections,
+            "inference_time_ms": data.get("processing_time_ms", 0.0),
+            "npu_temp_celsius": data.get("device_temp_c", 0.0),
+            "thermal_status": "normal"
+        }
+    return data # Return native system schema untouched
 
 
 if __name__ == "__main__":

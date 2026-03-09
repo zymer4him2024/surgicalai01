@@ -66,6 +66,7 @@ class HUDUpdate(BaseModel):
     border_color: Optional[BorderColor] = None
     scan_info: Optional[ScanInfo] = None
     flash_text: Optional[str] = None
+    center_text: Optional[str] = None  # persistent center prompt (empty string clears)
 
 
 class HealthResponse(BaseModel):

@@ -83,6 +83,7 @@ class _StateSnapshot:
     transition_progress: float  # 0.0 → 1.0
     scan_info: Optional[ScanInfo] = None
     flash_text: Optional[str] = None
+    center_text: Optional[str] = None
 
 
 class DisplayState:
@@ -104,6 +105,7 @@ class DisplayState:
         self._scan_info: Optional[ScanInfo] = None
         self._flash_text: Optional[str] = None
         self._flash_expires_at: float = 0.0
+        self._center_text: Optional[str] = None
 
         self.stop_requested: bool = False
         self.actual_fps: float = 0.0
@@ -125,6 +127,7 @@ class DisplayState:
         border_color: Optional[BorderColor],
         scan_info: Optional[ScanInfo] = None,
         flash_text: Optional[str] = None,
+        center_text: Optional[str] = None,
     ) -> None:
         with self._lock:
             if ai_status is not None:
@@ -138,6 +141,8 @@ class DisplayState:
             if flash_text is not None:
                 self._flash_text = flash_text
                 self._flash_expires_at = time.monotonic() + 3.0
+            if center_text is not None:
+                self._center_text = center_text or None  # empty string clears
             if border_color is not None and border_color != self._target_border_color:
                 self._border_color = _interpolated_color(
                     self._border_color, self._target_border_color, self._transition_progress
@@ -163,6 +168,7 @@ class DisplayState:
                 transition_progress=self._transition_progress,
                 scan_info=self._scan_info,
                 flash_text=flash,
+                center_text=self._center_text,
             )
 
 

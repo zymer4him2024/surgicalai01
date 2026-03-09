@@ -95,6 +95,10 @@ class HUDRenderer:
         if snap.flash_text:
             self._draw_flash_banner(canvas, snap.flash_text)
 
+        # 7) Persistent center prompt (e.g. "Por favor, escaneie o código QR")
+        if snap.center_text:
+            self._draw_center_prompt(canvas, snap.center_text)
+
     # ── Waiting screen ────────────────────────────────────────────────────────
 
     @staticmethod
@@ -309,6 +313,26 @@ class HUDRenderer:
             cv2.addWeighted(dark, 0.55, roi, 0.45, 0, roi)
             canvas[y1:y2, x1:x2] = roi
         cv2.putText(canvas, text, (x, y), FONT, scale, color, thickness, cv2.LINE_AA)
+
+    # ── Persistent center prompt ──────────────────────────────────────────────
+
+    @staticmethod
+    def _draw_center_prompt(canvas: np.ndarray, text: str) -> None:
+        h, w = canvas.shape[:2]
+        scale, thickness = 1.6, 2
+        (tw, th), _ = cv2.getTextSize(text, FONT, scale, thickness)
+        x = (w - tw) // 2
+        y = (h + th) // 2 + 40
+        pad = 24
+        y1 = max(0, y - th - pad)
+        y2 = min(h, y + pad)
+        x1 = max(0, x - pad)
+        x2 = min(w, x + tw + pad)
+        roi = canvas[y1:y2, x1:x2]
+        dark = np.zeros_like(roi)
+        cv2.addWeighted(dark, 0.60, roi, 0.40, 0, roi)
+        canvas[y1:y2, x1:x2] = roi
+        cv2.putText(canvas, text, (x, y), FONT, scale, C_WARN, thickness, cv2.LINE_AA)
 
     # ── QR flash banner (bottom center, 3s) ──────────────────────────────────
 

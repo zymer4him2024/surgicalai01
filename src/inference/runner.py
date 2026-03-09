@@ -62,6 +62,7 @@ SURGICAL_MAPPING: dict[str, str] = {
 
 # Model input resolution (YOLOv8: 640x640)
 INPUT_SIZE = 640
+SKIP_BACKGROUND = False
 
 # NMS parameters
 CONF_THRESHOLD = 0.50

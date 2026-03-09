@@ -1,310 +1,325 @@
 # Antigravity Surgical AI - Global Environment & Design Decisions
 
-## 1. 개요 (Overview)
-본 문서는 Raspberry Pi 5와 Hailo-8 기반의 AI 객체 인식 및 카운팅 시스템 구축을 위한 글로벌 환경 설정과 주요 설계 결정 사항을 기록합니다.
-CLAUDE.md와 GEMINI.md는 AI 어시스턴트(Claude, Gemini) 간의 컨텍스트 동기화를 위해 동일한 내용을 유지합니다.
+## 1. Overview
+This document records global environment settings and key design decisions for the AI object detection and counting system built on Raspberry Pi 5 and Hailo-8.
+CLAUDE.md and GEMINI.md maintain identical content for context synchronization across AI assistants.
 
 ---
 
-## 2. 하드웨어 환경 (Hardware)
+## 2. Hardware Environment
 - **Edge Device**: Raspberry Pi 5 (8GB) - 64-bit OS.
-- **AI Acceleration**: Hailo-8 M.2 Module (26 TOPS) - Docker Container 내에서 전 전용 드라이버로 제어.
-- **Imaging**: 4K USB Camera (초점 거리 고정, 고휘도 LED 링라이트 장착 권장).
-- **Network**: Wi-Fi 6 또는 Ethernet (Firebase 실시간 동기화용).
+- **AI Acceleration**: Hailo-8 M.2 Module (26 TOPS) - controlled via dedicated driver inside Docker container.
+- **Imaging**: 4K USB Camera (fixed focal length, high-brightness LED ring light recommended).
+- **Network**: Wi-Fi 6 or Ethernet (for Firebase real-time sync).
 
 ---
 
-## 3. 소프트웨어 환경 (Software)
-- **Python**: 3.10+ (권장 3.11)
-- **가상 환경 (Virtual Environment)**: `venv` 사용 (경로: `venv/`)
-- **컨테이너 환경**: Docker Compose
-- **패키지 관리 및 포맷팅**: `pyproject.toml`
+## 3. Software Environment
+- **Python**: 3.10+ (3.11 recommended)
+- **Virtual Environment**: `venv` (path: `venv/`)
+- **Container Environment**: Docker Compose
+- **Package Management & Formatting**: `pyproject.toml`
   - **Linting & Formatting**: Ruff
   - **Type Checking**: Pyright
-- **테스트 환경**: pytest (TDD & SOLID 원칙 준수)
-- **Firebase Hosting**: `https://surgicalai01.web.app` (배포 완료)
+- **Testing**: pytest (TDD & SOLID principles)
+- **Firebase Hosting**: `https://surgicalai01.web.app` (deployed)
 
 ---
 
-## 4. 네트워크 및 포트 설계 (Network & Port Design)
-모든 모듈은 Docker Internal Bridge 네트워크를 통해 API 통신을 수행합니다.
+## 4. Network & Port Design
+All modules communicate via the Docker internal bridge network.
 
-- **네트워크 이름**: `antigravity_bridge`
+- **Network Name**: `antigravity_bridge`
 - **Subnet**: `172.20.0.0/16`
 
-### 모듈별 할당된 IP 및 Port
-| Module 이름 | 컨테이너 이름 | 고정 IP 주소 | 할당 포트 | 외부 노출 | 설명 |
+### Module IP & Port Assignments
+| Module | Container Name | Fixed IP | Port | External | Description |
 |---|---|---|---|---|---|
-| Module B (Main) | `gateway_agent` | `172.20.0.10` | `8000` | ✅ `localhost:8000` | 메인 컨트롤러, QR 해독, 상태 머신 |
-| Module A (Inference) | `inference_agent` | `172.20.0.11` | `8001` | ❌ 내부 전용 | Hailo-8 기반 추론 (YOLOv11) |
-| Camera Agent | `camera_agent` | `172.20.0.12` | `8002` | ❌ 내부 전용 | 4K 카메라 프레임 캡처 |
-| Module C (Display) | `display_agent` | `172.20.0.13` | `8003` | ❌ 내부 전용 | HDMI HUD 출력 (더블 버퍼 렌더링) |
-| Module D (Storage) | `firebase_sync_agent` | `172.20.0.14` | `8004` | ❌ 내부 전용 | 비동기 Firestore/Storage 동기화 |
-| Device Master | `device_master_agent` | `172.20.0.15` | `8005` | ❌ 내부 전용 | FDA 표준 명칭 매핑 및 MDM 연동 |
+| Module B (Main) | `gateway_agent` | `172.20.0.10` | `8000` | `localhost:8000` | Main controller, QR decode, state machine |
+| Module A (Inference) | `inference_agent` | `172.20.0.11` | `8001` | Internal only | Hailo-8 inference (YOLOv11) |
+| Camera Agent | `camera_agent` | `172.20.0.12` | `8002` | Internal only | 4K camera frame capture |
+| Module C (Display) | `display_agent` | `172.20.0.13` | `8003` | Internal only | HDMI HUD output (double-buffer rendering) |
+| Module D (Storage) | `firebase_sync_agent` | `172.20.0.14` | `8004` | Internal only | Async Firestore/Storage sync |
+| Device Master | `device_master_agent` | `172.20.0.15` | `8005` | Internal only | FDA mapping & Cloud Meta DB bridge |
+| Mock External AI | `mock_external_ai` | `172.20.0.16` | `8006` | Internal only | Simulated 3rd-party edge AI (API Mock) |
 
 ---
 
-## 5. Docker Compose 파일 구성 (Compose Variants)
+## 5. Docker Compose File Variants
 
-| 파일명 | 사용 환경 | 특징 |
+| File | Environment | Notes |
 |---|---|---|
-| `docker-compose.yml` | **RPi 5 + Hailo-8 타겟** | `/dev/hailo0` 디바이스 매핑, `device_cgroup_rules` 활성 |
-| `docker-compose.mac.yml` | **Mac 로컬 개발/시뮬레이션** | 디바이스 매핑 없음, `HEF_PATH=/app/models/simulation.hef` |
+| `docker-compose.yml` | **RPi 5 + Hailo-8 target** | `/dev/hailo0` device mapping, `device_cgroup_rules` enabled |
+| `docker-compose.mac.yml` | **Mac local dev/simulation** | No device mapping, `HEF_PATH=/app/models/simulation.hef` |
 
-### Mac에서 실행 (시뮬레이션 모드)
+### Run on Mac (simulation mode)
 ```bash
 docker-compose -f docker-compose.mac.yml up -d --build
 ```
 
-### Raspberry Pi 5에서 실행 (실제 Hailo-8)
+### Run on Raspberry Pi 5 (real Hailo-8)
 ```bash
 docker-compose up -d --build
 ```
 
 ---
 
-## 6. 모듈별 상세 아키텍처 (Modular Architecture)
+## 6. Modular Architecture
 
-### 🏗️ Module A: AI Inference Container (The "Inference Engine")
-오직 "이미지를 받아서 숫자를 뱉는" 역할만 수행.
-- **엔드포인트**: `POST /inference` (YOLOv11 기반 객체 탐지)
-- **성능 고려**: Shared Memory (메모리 맵핑) 고려, 여러 기구 중첩 시 Batching/Tiling 로직.
+### Module A: AI Inference Container (The "Inference Engine")
+Sole responsibility: receive an image, return counts.
+- **Endpoint**: `POST /inference` (YOLOv11-based object detection)
+- **Performance**: Shared memory (mmap) considered; batching/tiling for overlapping instruments.
 
-### 🛡️ Module B: Main Controller & QR Decoder (The "Orchestrator")
-시스템의 상태 머신(State Machine) 및 메인 컨트롤 루프 관리.
-- **QR 스캔 루프**: 카메라 프레임에서 QR 코드를 감시.
-- **작업 관리**: QR에 기반하여 `current_job` 생성(Target Count).
-- **5-Second Logic**: 프레임과 Inference 결과를 대조하고, 5초 이상 Target과 실제 개수가 다르면 Warning/Error 상태로 진입.
+### Module B: Main Controller & QR Decoder (The "Orchestrator")
+Manages the system state machine and main control loop.
+- **QR Scan Loop**: Monitors camera frames for QR codes.
+- **Job Management**: Creates `current_job` with target count based on QR data.
+- **5-Second Logic**: If actual count differs from target for 5+ seconds, transitions to Warning/Error state.
 
-### 🖥️ Module C: HDMI Display & UI Overlay (The "Frontend")
-비디오 피드와 상태 UI 렌더링 (Raspberry Pi HDMI).
-- **READY (Yellow)**: 스캔 중. `[Target: N items]`. 노란색 20px 테두리.
-- **MATCH (Green)**: 수량 일치. 테두리 녹색. PASS 사운드 트리거.
-- **ERROR (Red)**: 불일치. 빨간색 깜빡임, 초과/부족 아이템 텍스트 표시.
+### Module C: HDMI Display & UI Overlay (The "Frontend")
+Renders video feed and status UI to Raspberry Pi HDMI output.
+- **READY (Yellow)**: Scanning. `[Target: N items]`. 20px yellow border.
+- **MATCH (Green)**: Count matches. Green border. PASS sound triggered.
+- **ERROR (Red)**: Mismatch. Red blinking border, over/under item text displayed.
 
-### 📊 Module D: Firebase Cloud Sync (The "Backend Liaison")
-비동기로 데이터를 영속화.
-- **Firestore**: 검수 이력 기록.
-- **Storage**: 에러(ERROR 상태 5초 지속) 발생 시점 기준 0.5초 후 0.1초 간격 3장 원본 스냅샷 캡처 및 업로드.
+### Module D: Firebase Cloud Sync (The "Backend Liaison")
+Persists data asynchronously.
+- **Firestore**: Records inspection history.
+- **Storage**: On ERROR state lasting 5 seconds, captures 3 snapshots (0.5s delay, 0.1s interval) and uploads.
 
-### 🔍 Device Master Agent (The "Encyclopedia")
-YOLO 레이블을 표준 제품명으로 변환.
-- **FDA Mapping**: `forceps` → `Tissue Forceps, Ring (FDA Class I)`
-- **MDM Bridge**: 고객사 내부 제품 코드 매핑을 위한 확장성 제공.
+### Device Master Agent (The "Encyclopedia")
+Translates YOLO labels to standardized product names.
+- **FDA Mapping**: `forceps` -> `Tissue Forceps, Ring (FDA Class I)`
+- **Cloud Bridge**: Connects securely to the Digioptics Application DB to fetch latest customer-mapped catalog. Does not connect directly to Customer DB.
+
+### Mock External AI (The "Adapter Tester")
+Simulates 3rd-party edge inference for integration testing.
+- **Protocol**: HTTP/JSON (Schema intentionally differs from native Module A).
+- **Gateway Adapter**: Gateway Agent includes a translation layer (`_normalize_inference_response`) to handle external schemas.
 
 ---
 
-## 7. 현재 시스템 상태 관리 (Phase)
+## 7. System Status (Phase)
 
-### 완료 상태 ✅
-| 항목 | 설명 |
+### Completed
+| Item | Description |
 |---|---|
-| Module B (Gateway) | `gateway_agent` | QR/Job 연동, 상태 머신 (READY->MATCH->ERROR), 5초 지연 트리거 완료 |
-| Module A (Inference) | `inference_agent` | RPi5 + Hailo-8 실기기 가동 완료 (mode=hailo) |
-| Firebase Pipeline | `firebase_sync` | 에러 시 스냅샷 트리거 및 Async Storage 업로드 완료 |
-| HDMI Display (Module C) | `display_agent` | HDMI 출력 및 ASCII HUD 오버레이 연동 완료 (xhost 권한 해결) |
-| Autonomous System | **Internal Logic** | Gateway 기반 자율 카운팅 루프 (Pull-based) 구현 완료 |
-| UI/UX Polish | **Favicon/HUD** | SVG Favicon 적용 및 HUD ASCII 문자 대체 완료 |
-| SurgeoNet Prep | **Model/Labels** | 14개 수술 도구 라벨 맵핑 및 Device Master 메타데이터 동기화 완료 |
-| Preset Cycle | **Admin Dashboard** | 5개 랜덤 프리셋 세트 자동 순환 (Set 1→2→3→4→5→1). Firestore `job_config/rpi`에 `sets[]` + `cursor` 저장. MATCH/ERROR 후 5초 뒤 다음 세트로 자동 전환. |
-| QR Flash Indicator | **Display HUD** | QR 스캔 성공 시 하단 중앙에 "QR SCANNED" 배너 3초 표시. `flash_text` 필드가 `/hud` 엔드포인트에 추가됨. display_agent 재빌드 필요. |
-| QR Trigger | **Gateway** | `/job` 엔드포인트는 `_pending_preset`에 저장. QR 스캔 시 `_pending_preset → current_job` 전환하여 detection 시작. |
-| One-click Launcher | **RPi Desktop** | `~/Desktop/SurgicalAI.desktop` 더블클릭으로 `xhost +local:` 및 `docker compose up -d` 자동 실행. |
+| Module B (Gateway) | QR/Job integration, state machine (READY->MATCH->ERROR), 5-second delay trigger |
+| Module A (Inference) | RPi5 + Hailo-8 hardware running (mode=hailo) |
+| Firebase Pipeline | Error snapshot trigger and async Storage upload |
+| HDMI Display (Module C) | HDMI output and ASCII HUD overlay (xhost permission resolved) |
+| Autonomous System | Gateway-based autonomous counting loop (pull-based) |
+| UI/UX Polish | SVG favicon and HUD ASCII character substitution |
+| SurgeoNet Prep | 14 surgical tool label mapping and Device Master metadata sync |
+| Preset Cycle | 5 random preset sets auto-cycle (Set 1->2->3->4->5->1). Stored in Firestore `job_config/rpi` as `sets[]` + `cursor`. Auto-advances 5s after MATCH/ERROR. |
+| QR Flash Indicator | "QR SCANNED" banner shown for 3s at bottom center on successful QR scan. `flash_text` field added to `/hud` endpoint. |
+| QR Trigger | `/job` endpoint stores to `_pending_preset`. QR scan transitions `_pending_preset -> current_job` to start detection. |
+| One-click Launcher | `~/Desktop/SurgicalAI.desktop` double-click runs `xhost +local:` and `docker compose up -d`. |
+| 3rd Party AI Mock | Mock service (`mock_external_ai`) and Gateway adapter logic implemented and verified via local simulation. |
 
-### 🌐 Web Dashboard (Firebase Hosting & Authentication)
-현재 `Firebase Hosting`으로 배포되어 있으며, **Google Login**을 통한 보안 접속이 필수입니다. (`firestore.rules` 접근 통제)
+### Web Dashboard (Firebase Hosting & Authentication)
+Deployed on Firebase Hosting. Google Login required (enforced via `firestore.rules`).
 - **Tech Stack**: HTML, Tailwind CSS, Vanilla JS, Firebase v10 SDK.
-- **Admin View (`/admin`)**: `sync_events` 컬렉션을 onSnapshot으로 실시간 감시하며, 에러(mismatch/alert) 트레이 목록만 노출합니다. 항목 클릭 시 Storage에 저장된 스냅샷 3장이 슬라이더 모달 형태로 노출.
-- **Company View (`/`)**: 오늘 전체 검수 성공률을 대형 숫자로 시각화하며, Chart.js를 연동하여 시간대별 검수 처리량(Throughput)을 막대 차트로 표시.
+- **Admin View (`/admin`)**: Monitors `sync_events` collection via onSnapshot; shows only error (mismatch/alert) tray items. Click to view 3 Storage snapshots in a slider modal.
+- **Company View (`/`)**: Displays today's overall inspection pass rate as a large number; Chart.js bar chart for hourly throughput.
 
 ==================================================
-# 개발 및 실행 가이드 (Quick Start)
+# Development & Execution Guide (Quick Start)
 ==================================================
 
-### 가상 환경 셋업
+### Virtual Environment Setup
 ```bash
 chmod +x setup.sh
 ./setup.sh
 ```
 
-### Mac 로컬 시뮬레이션 실행
+### Run Mac Local Simulation
 ```bash
 docker compose -f docker-compose.mac.yml up -d --build
 ```
 
-### 테스트용 curl 명령어 예측
+### Useful curl Commands
 ```bash
-# Gateway(Module B) 상태 확인
+# Check Gateway (Module B) status
 curl http://localhost:8000/health
 
-# Inference(Module A) 백엔드 단일 접근
+# Access Inference (Module A) backend directly from inside network
 docker exec inference_agent curl -s -X POST http://localhost:8001/inference -F "image=@/path/test.jpg"
+
+### API & Deployment Documentation
+- [RPi Onboarding & Deployment Guide](docs/rpi_onboarding_guide.md)
+- [System Integration Architecture](docs/integration_architecture.md)
+- [3rd Party AI Inference Integration](docs/3rd_party_ai_inference_spec.md)
+- [Customer Device Master API](docs/customer_api_spec.md)
+- [Device Master Catalog & Mapping](docs/device_master_catalog_spec.md)
 ```
 
 ---
 
 ## 8. Physical Deployment (RPi5 + Hailo-8)
 
-### 사전 조건 (Prerequisites)
-- **OS**: Raspberry Pi OS (64-bit, Debian Bookworm 기반)
-- **Hardware**: Raspberry Pi 5 (8GB 권장), Hailo-8 M.2 HAT+
-- **Storage**: 32GB+ MicroSD 또는 NVMe SSD (여유 공간 10GB 이상)
-- **Network**: 인터넷 연결 필수 (apt 패키지 및 Docker 이미지 다운로드)
-- **사용자 권한**: sudo 권한이 있는 일반 사용자 (root 직접 실행 금지)
+### Prerequisites
+- **OS**: Raspberry Pi OS (64-bit, Debian Bookworm-based)
+- **Hardware**: Raspberry Pi 5 (8GB recommended), Hailo-8 M.2 HAT+
+- **Storage**: 32GB+ MicroSD or NVMe SSD (10GB+ free space)
+- **Network**: Internet connection required (apt packages and Docker image pulls)
+- **User Permissions**: Regular user with sudo (do not run as root)
 
-### 스크립트 목록 (`scripts/` 디렉터리)
-| 스크립트 | 역할 | 재부팅 필요 |
+### Scripts (`scripts/` directory)
+| Script | Role | Reboot Required |
 |---|---|---|
-| `check_system.sh` | 사전/사후 점검 (7개 카테고리) | ❌ |
-| `setup_hailo.sh` | Hailo-8 드라이버 설치 (hailo-all, DKMS, udev) | ✅ |
-| `setup_docker.sh` | Docker CE + Compose 설치 및 데몬 최적화 | ❌ |
-| `optimize_rpi5.sh` | RPi5 성능 최적화 (CPU, PCIe, 커널 파라미터) | ✅ |
+| `check_system.sh` | Pre/post check (7 categories) | No |
+| `setup_hailo.sh` | Hailo-8 driver install (hailo-all, DKMS, udev) | Yes |
+| `setup_docker.sh` | Docker CE + Compose install and daemon optimization | No |
+| `optimize_rpi5.sh` | RPi5 performance tuning (CPU, PCIe, kernel params) | Yes |
 
-### 배포 순서 (Step-by-Step)
+### Deployment Steps
 
 ```bash
-# 1. 스크립트 실행 권한 부여
+# 1. Grant script permissions
 chmod +x scripts/*.sh
 
-# 2. 사전 점검 (현재 상태 확인)
+# 2. Pre-check
 ./scripts/check_system.sh
 
-# 3. Hailo-8 드라이버 설치
+# 3. Install Hailo-8 driver
 ./scripts/setup_hailo.sh
-# → 완료 후 sudo reboot
+# -> sudo reboot after completion
 
-# 4. (재부팅 후) Hailo-8 장치 확인
+# 4. (After reboot) Verify Hailo-8 device
 ls -la /dev/hailo0
 hailortcli fw-control identify
 
-# 5. Docker 설치
+# 5. Install Docker
 ./scripts/setup_docker.sh
-# → 로그아웃 후 재로그인 (docker 그룹 적용)
+# -> Log out and back in (to apply docker group)
 
-# 6. RPi5 성능 최적화
+# 6. RPi5 performance optimization
 ./scripts/optimize_rpi5.sh
-# → 완료 후 sudo reboot
+# -> sudo reboot after completion
 
-# 7. (재부팅 후) 최종 점검
+# 7. (After reboot) Final check
 ./scripts/check_system.sh
-# → FAIL 0건이면 배포 준비 완료
+# -> 0 FAILs = ready for deployment
 
-# 8. 시스템 시작
+# 8. Start system
 docker compose up -d --build
 ```
 
-### 핵심 커널 파라미터 (Key Kernel Parameters)
+### Key Kernel Parameters
 
 #### `/boot/firmware/config.txt`
-| 파라미터 | 값 | 효과 |
+| Parameter | Value | Effect |
 |---|---|---|
-| `arm_boost` | `1` | CPU 터보 활성화 (2.4GHz) |
-| `over_voltage_delta` | `50000` | +50mV 전압 부스트 (터보 안정성) |
-| `gpu_mem` | `64` | VideoCore 메모리 최소화 (추론 RAM 확보) |
-| `dtparam=pciex1_gen` | `3` | PCIe Gen3 (5GT/s, Hailo-8 최대 대역폭) |
+| `arm_boost` | `1` | Enable CPU turbo (2.4GHz) |
+| `over_voltage_delta` | `50000` | +50mV voltage boost (turbo stability) |
+| `gpu_mem` | `64` | Minimize VideoCore memory (more RAM for inference) |
+| `dtparam=pciex1_gen` | `3` | PCIe Gen3 (5GT/s, max Hailo-8 bandwidth) |
 
-#### `/boot/firmware/cmdline.txt` (한 줄에 추가)
-| 파라미터 | 효과 |
+#### `/boot/firmware/cmdline.txt` (append to single line)
+| Parameter | Effect |
 |---|---|
-| `pcie_aspm=off` | PCIe Active State Power Management 비활성화 (추론 레이턴시 ~1ms 감소) |
-| `usbcore.autosuspend=-1` | USB 오토서스펜드 비활성화 (카메라 안정성) |
+| `pcie_aspm=off` | Disable PCIe ASPM (reduces inference latency ~1ms) |
+| `usbcore.autosuspend=-1` | Disable USB auto-suspend (camera stability) |
 
 #### `/etc/sysctl.d/99-surgicalai.conf`
-| 파라미터 | 값 | 효과 |
+| Parameter | Value | Effect |
 |---|---|---|
-| `vm.swappiness` | `5` | 스왑 최소화 (ML 워크로드) |
-| `fs.file-max` | `131072` | 파일 디스크립터 한도 (Docker + Hailo + Camera) |
-| `kernel.shmmax` | `536870912` | Hailo SDK POSIX SHM 공유 메모리 (512MB) |
+| `vm.swappiness` | `5` | Minimize swap (ML workload) |
+| `fs.file-max` | `131072` | File descriptor limit (Docker + Hailo + Camera) |
+| `kernel.shmmax` | `536870912` | Hailo SDK POSIX SHM shared memory (512MB) |
 
-### docker-compose.yml cgroup 규칙 업데이트
+### docker-compose.yml cgroup Rule Update
 
-`/dev/hailo0`의 실제 메이저 번호는 커널 버전마다 다를 수 있습니다.
+The actual major number of `/dev/hailo0` may vary by kernel version.
 
 ```bash
-# 실제 메이저 번호 확인
+# Check actual major number
 stat -c '%t' /dev/hailo0 | xargs -I{} printf '%d\n' 0x{}
 
-# docker-compose.yml에 반영 (예: 메이저 번호가 235인 경우)
+# Reflect in docker-compose.yml (e.g., if major number is 235)
 # device_cgroup_rules:
 #   - "c 235:* rmw"
 ```
 
-### Firebase 프로덕션 모드 설정
+### Firebase Production Mode Setup
 
-실제 Firestore/Storage에 데이터를 기록하려면 서비스 계정 키 파일이 필요합니다.
+A service account key file is required to write to real Firestore/Storage.
 
 ```bash
-# 1. Firebase 콘솔에서 서비스 계정 키 다운로드
-#    Firebase Console → 프로젝트 설정 → 서비스 계정 → 새 비공개 키 생성
+# 1. Download service account key from Firebase Console
+#    Firebase Console -> Project Settings -> Service Accounts -> Generate new private key
 
-# 2. 키 파일을 프로젝트 루트에 복사
+# 2. Copy key file to project root
 cp ~/Downloads/firebase-service-account.json ./firebase-credentials.json
 
-# 3. .env 파일에 경로 설정
+# 3. Set path in .env
 echo "FIREBASE_CREDENTIALS_PATH=/app/firebase-credentials.json" >> .env
 
-# 4. docker-compose.yml에 볼륨 마운트 확인
+# 4. Verify volume mount in docker-compose.yml
 #    volumes:
 #      - ./firebase-credentials.json:/app/firebase-credentials.json:ro
 ```
 
-### 배포 후 검증 명령어
+### Post-Deployment Verification
 
 ```bash
-# NPU 상태 및 온도 확인
+# NPU status and temperature
 hailortcli fw-control identify
-hailortcli monitor  # Ctrl+C로 종료
+hailortcli monitor  # Ctrl+C to exit
 
-# CPU 주파수 확인 (2400000 = 2.4GHz가 정상)
+# CPU frequency check (2400000 = 2.4GHz is normal)
 cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_cur_freq
-cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor  # → performance
+cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor  # -> performance
 
-# 컨테이너 상태 확인
+# Container status
 docker compose ps
 
-# 전체 파이프라인 E2E 테스트
+# Full pipeline E2E test
 curl -X POST http://localhost:8000/job \
   -H "Content-Type: application/json" \
   -d '{"job_id":"DEPLOY-TEST-001","target":{"scalpel":1}}'
 
-# NPU 통계 확인
+# NPU stats
 curl http://localhost:8001/metrics
 ```
 
-### 🔄 Mac → RPi 코드 동기화 워크플로우
+### Mac -> RPi Code Sync Workflow
 
-Mac에서 편집한 파일을 RPi에 반영할 때 반드시 아래 순서를 따를 것:
+Always follow this sequence when syncing Mac edits to RPi:
 
 ```bash
-# 1. Mac → RPi 파일 전송 (Mac 터미널에서 실행)
+# 1. Mac -> RPi file transfer (run from Mac terminal)
 ssh digioptics_am01@192.168.0.4 "mkdir -p ~/SurgicalAI01/src/<module>"
 scp /Users/shawnshlee/1_Antigravity/SurgicalAI01/src/<module>/main.py \
   digioptics_am01@192.168.0.4:~/SurgicalAI01/src/<module>/main.py
 
-# 2. RPi → 컨테이너 적용 (RPi 터미널에서 실행)
+# 2. RPi -> Container apply (run from RPi terminal)
 docker cp ~/SurgicalAI01/src/<module>/main.py <container_name>:/app/src/<module>/main.py
 docker restart <container_name>
 
-# 3. 영구 반영 (이미지 재빌드) — docker compose up -d 시 초기화되지 않도록
+# 3. Permanent apply (image rebuild) — required so changes survive docker compose up -d
 cd ~/SurgicalAI01
 docker compose build --no-cache <service_name>
 docker compose up -d <service_name>
 ```
 
-**중요**: `docker cp`로 적용한 변경은 `docker compose up -d`로 컨테이너가 재생성되면 사라진다. 반드시 이미지 재빌드로 영구 반영할 것.
+**Important**: Changes applied via `docker cp` are lost when the container is recreated by `docker compose up -d`. Always rebuild the image for permanent changes.
 
-### 🛠 주요 트러블슈팅 로그 (Troubleshooting Ledger)
+### Troubleshooting Ledger
 
-1. **PCIe 미인식 (`/dev/hailo0` 없음)**: `/boot/firmware/config.txt`에서 불완전한 `dtparam=pciex1=` 오타 제거 후 `dtparam=pciex1` 및 `dtparam=pciex1_gen=3` 명시하여 해결.
-2. **Inference Agent 권한 오류**: `Dockerfile.inference`를 수정하여 `root` 사용자로 실행하고 홈 디렉토리를 생성하여 HailoRT 로그 및 디바이스 접근 권한 해결.
-3. **`HAILO_OUT_OF_PHYSICAL_DEVICES`**: 온도 모니터링 스레드가 SDK를 통해 중복 접근하는 것을 방지하기 위해 `sysfs` 직접 읽기 방식으로 수정.
-4. **HDMI 오버레이 미출력**: RPi OS Bookworm의 보안 정책 해결을 위해 호스트에서 `xhost +local:` 명령 실행 후 Display Agent 재시작.
-5. **HUD 문자 깨짐 (???)**: OpenCV 기본 폰트의 Unicode 미지원으로 인해 `◈`를 ASCII `[+]`로 대체하여 해결.
-6. **실시간성 부족**: Gateway Agent를 수동 요청 기반에서 자율 `_counting_loop` (Pull-based) 방식으로 전환하여 Job 활성화 시 즉시 실시간 추론 수행.
-7. **컨테이너 코드 동기화**: 로컬 개발 시 소스 변경이 즉시 반영되도록 `docker-compose.mac.yml`에 볼륨 마운트 (`./src:/app/src`) 적용.
-8. **SurgeoNet 통합 준비**: SurgeoNet의 14개 클래스(`Overholt Clamp`, `Scalpel` 등)를 `DEFAULT_CLASS_NAMES` 및 `labels.json`에 반영하여 추론 결과 연동 준비 완료. (Class 0 Background 필터링 포함)
-9. **`SyntaxError: name 'current_job' is used prior to global declaration`**: `_counting_loop` 함수 내 `global` 선언이 함수 중간(~line 403)에 있어 루프 상단에서 `current_job`을 먼저 사용한 것이 원인. `global` 선언 전체를 함수 최상단(docstring 바로 아래)으로 이동하여 해결.
-10. **`docker cp` 후에도 구버전 실행**: RPi의 `~/SurgicalAI01/src/` 파일이 Mac과 별도로 관리됨. `docker cp ~/SurgicalAI01/src/...`는 RPi 로컬 파일을 복사하므로 Mac에서 수정한 내용이 반영 안 됨. 반드시 Mac → RPi SCP 후 docker cp 실행할 것.
-11. **camera_agent 포트 외부 접근 불가 (HTTP 000)**: `camera_agent:8002`는 Docker 내부 네트워크에만 노출 (`expose`). 호스트에서 `curl localhost:8002`는 실패가 정상. 내부 테스트는 `docker exec gateway_agent curl http://camera_agent:8002/frame` 사용.
-12. **카메라 재연결 후 camera_agent 인식 실패**: USB 카메라 재연결 시 `docker restart camera_agent` 필요. OpenCV VideoCapture는 시작 시점에 디바이스를 열므로 재시작 없이는 새 연결을 인식하지 못함.
-13. **HDMI overlay silent death (service healthy, screen blank)**: `_render_loop()` had zero exception handling — a single numpy/OpenCV error during HUD rendering would silently kill the daemon thread. FastAPI `/health` kept responding normally, making it undetectable via container status alone. Fixed by adding try/except with consecutive error counter in `display/main.py`, and canvas bounds clamping in `display/hud.py` (`_panel_bg`, `_draw_status_text`).
+1. **PCIe not detected (`/dev/hailo0` missing)**: Removed malformed `dtparam=pciex1=` typo from `/boot/firmware/config.txt`; explicitly set `dtparam=pciex1` and `dtparam=pciex1_gen=3`.
+2. **Inference Agent permission error**: Modified `Dockerfile.inference` to run as `root` and create home directory, resolving HailoRT log and device access permissions.
+3. **`HAILO_OUT_OF_PHYSICAL_DEVICES`**: Prevented duplicate SDK access from temperature monitoring thread by switching to direct `sysfs` reads.
+4. **HDMI overlay not displaying**: Resolved RPi OS Bookworm security policy by running `xhost +local:` on host before restarting Display Agent.
+5. **HUD character corruption (???)**: OpenCV default font does not support Unicode; replaced `◈` with ASCII `[+]`.
+6. **Insufficient real-time response**: Converted Gateway Agent from manual request-based to autonomous `_counting_loop` (pull-based), enabling immediate real-time inference when job is active.
+7. **Container code sync**: Applied volume mount (`./src:/app/src`) in `docker-compose.mac.yml` for immediate local dev changes.
+8. **SurgeoNet integration prep**: Reflected SurgeoNet's 14 classes (`Overholt Clamp`, `Scalpel`, etc.) in `DEFAULT_CLASS_NAMES` and `labels.json`; includes Class 0 Background filtering.
+9. **`SyntaxError: name 'current_job' is used prior to global declaration`**: `global` declaration in `_counting_loop` was mid-function (~line 403); moved all `global` declarations to top of function (just below docstring).
+10. **`docker cp` not reflecting Mac changes**: RPi's `~/SurgicalAI01/src/` is managed separately from Mac. `docker cp ~/SurgicalAI01/src/...` copies RPi local files, not Mac edits. Always SCP from Mac to RPi first, then `docker cp`.
+11. **`camera_agent` port unreachable from host (HTTP 000)**: `camera_agent:8002` is only exposed on Docker internal network (`expose`). `curl localhost:8002` from host will fail by design. Use `docker exec gateway_agent curl http://camera_agent:8002/frame` for internal testing.
+12. **Camera reconnect not detected**: USB camera reconnect requires `docker restart camera_agent`. OpenCV VideoCapture opens the device at startup and cannot detect new connections without a restart.
+13. **HDMI overlay silent death (service healthy, screen blank)**: `_render_loop()` had no exception handling — a single numpy/OpenCV error would silently kill the daemon thread while FastAPI `/health` kept responding normally. Fixed by adding try/except with consecutive error counter in `display/main.py`, and canvas bounds clamping in `display/hud.py` (`_panel_bg`, `_draw_status_text`).
+14. **`IndentationError` in Gateway Adapter**: Accidentally introduced an indentation error while injecting the `_normalize_inference_response` function into `gateway/main.py`. Resolved by reverting to git state and carefully re-applying chunks.

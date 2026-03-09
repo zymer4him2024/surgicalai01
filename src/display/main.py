@@ -214,6 +214,7 @@ async def update_hud(body: HUDUpdate) -> JSONResponse:
         border_color=body.border_color,
         scan_info=body.scan_info,
         flash_text=body.flash_text,
+        center_text=body.center_text,
     )
     return JSONResponse({"status": "ok"})
 

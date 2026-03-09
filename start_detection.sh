@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Move to project directory
-cd ~/SurgicalAI01 || exit 1
+# Add Docker Desktop to PATH just in case symlinks are broken
+export PATH="/Applications/Docker.app/Contents/Resources/bin:$PATH"
 
-COMPOSE="docker compose"
+# Move to project directory
+cd ~/1_Antigravity/SurgicalAI01 || exit 1
+
+COMPOSE="docker compose -f docker-compose.mac.yml"
 GATEWAY="http://localhost:8000"
 
 # Fix X11 Permissions for the Display Agent

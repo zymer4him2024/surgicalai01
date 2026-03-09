@@ -21,12 +21,19 @@
 
 ## 연동 구조
 
+고객사 DB는 물리적 Edge Device(장비)와 직접 통신하지 않습니다.
+Digioptics 클라우드(Application DB)가 중개자 역할을 수행합니다.
+
 ```
 [Antigravity RPi5 Edge Device]
         │
-        │  HTTP/JSON
+        │  (Digioptics Internal API)
         ▼
-[귀사 MDM API 서버]  ← 본 문서의 대상
+[Digioptics Application DB (Cloud)]
+        │
+        │  HTTP/JSON (서버 대 서버 통신)
+        ▼
+[귀사 MDM API 서버 / Customer DB]  ← 본 문서의 대상
   GET /device/lookup?label=forceps
   GET /health
 ```
@@ -150,12 +157,9 @@ Authorization: Bearer <API_KEY>
 
 1. 귀사 MDM 팀이 위 두 엔드포인트를 구현합니다.
 2. 저희에게 서버 Base URL 및 API Key를 전달합니다.
-3. 저희가 `docker-compose.yml`의 환경변수를 변경합니다:
-   ```yaml
-   DEVICE_MASTER_URL=https://mdm.your-hospital.com/api/v1
-   DEVICE_MASTER_API_KEY=your-api-key-here
-   ```
-4. 저희가 스테이징 환경에서 E2E 연동 테스트를 수행합니다.
+3. 저희 Digioptics 클라우드(Application DB) 백엔드에 해당 URL을 연동합니다.
+   (Edge Device 코드는 수정되지 않습니다.)
+4. 저희가 스테이징 환경에서 클라우드 간(S2S) E2E 연동 테스트를 수행합니다.
 5. 검수 후 실 운영으로 전환합니다.
 
 ---

@@ -1,15 +1,16 @@
 """
-cache.py — openFDA Device Classification API query and local cache
+cache.py — Device catalog cache (source: Digioptics Firebase Application DB)
 
 Strategy:
-  1. Read labels.json on startup (YOLO label → FDA search term mapping)
+  1. Read labels.json on startup (YOLO label → device info mapping)
   2. If /app/data/device_cache.json exists and is < 7 days old, load from file
-  3. Otherwise query Firebase to build cache
+  3. Otherwise query Firebase 'device_catalog' collection to build cache
   4. On Firebase failure, use labels.json fallback values
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -116,7 +117,7 @@ def _try_load_from_file(labels_config: dict) -> bool:
 
     age_hours = (time.time() - CACHE_FILE.stat().st_mtime) / 3600
     if age_hours > CACHE_TTL_HOURS:
-        logger.info("Cache file expired (%.1f h) — refreshing from openFDA", age_hours)
+        logger.info("Cache file expired (%.1f h) — refreshing from Firebase", age_hours)
         return False
 
     try:
@@ -134,9 +135,6 @@ def _try_load_from_file(labels_config: dict) -> bool:
     except Exception as exc:
         logger.warning("Cache file corrupt (%s) — rebuilding", exc)
         return False
-
-
-import asyncio
 
 
 def _build_from_catalog(label: str, cfg: dict, catalog_entry: dict | None) -> DeviceLookupResponse:

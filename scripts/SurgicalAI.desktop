@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=SurgicalAI
+Comment=Start Surgical AI System
+Exec=bash -c "DISPLAY=:0 xhost +local: && cd ~/SurgicalAI01 && docker compose up -d"
+Icon=utilities-terminal
+Terminal=true
+Type=Application
+Categories=Application;

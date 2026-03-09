@@ -27,7 +27,7 @@ services:
       - DEFAULT_TARGET={}
       - DEVICE_MASTER_URL=http://device_master_agent:8005
     volumes:
-      - /sys/class/thermal:/sys/class/thermal:ro  # CPU 온도 읽기용
+      - /sys/class/thermal:/sys/class/thermal:ro
     depends_on:
       - device_master_agent
 
@@ -44,19 +44,16 @@ services:
       antigravity_bridge:
         ipv4_address: 172.20.0.11
 
-    # ── Hailo-8 하드웨어 접근 설정 ──────────────────────────────────────────
-    # /dev/hailo0: NPU 디바이스 노드 (PCIe M.2 슬롯)
+    # Hailo-8 NPU device access (PCIe M.2)
     privileged: true
     devices:
       - /dev/hailo0:/dev/hailo0
 
-    # ── 메모리 / 공유 메모리 설정 ────────────────────────────────────────────
-    # Hailo SDK는 내부적으로 POSIX SHM을 사용해 DMA 버퍼 공유
+    # Hailo SDK uses POSIX SHM internally for DMA buffer sharing
     shm_size: '512mb'
     mem_limit: '2g'
     memswap_limit: '2g'
 
-    # ── ulimit: 열린 파일 디스크립터 한도 상향 ───────────────────────────────
     ulimits:
       nofile:
         soft: 65535
@@ -67,23 +64,20 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 20s # 드라이버 초기화 대기
+      start_period: 20s
 
     environment:
       - MODULE_NAME=InferenceAgent
       - HAILO_DEVICE=/dev/hailo0
-      - HEF_PATH=/app/models/yolov8.hef # POC: COCO 80-class 모델 (검증된 정확도)
-      - TEMP_WARNING_CELSIUS=85.0 # 과열 경고 임계 온도 (℃)
-      - TEMP_CRITICAL_CELSIUS=95.0 # 크리티컬 임계 (추론 중단)
-      - INFERENCE_TIMEOUT_SEC=10 # 단건 추론 최대 대기 시간
+      - HEF_PATH=/app/models/yolov8.hef
+      - TEMP_WARNING_CELSIUS=85.0
+      - TEMP_CRITICAL_CELSIUS=95.0
+      - INFERENCE_TIMEOUT_SEC=10
       - PYTHONUNBUFFERED=1
 
     volumes:
-      - ./models:/app/models:ro # HEF 모델 파일 마운트 (읽기 전용)
-      # ── Hailo Python SDK & 공유 라이브러리 (호스트 python3-hailort 패키지 재사용) ──
-      # hailo_platform 모듈: PYTHONPATH=/app 이므로 /app 하위에 마운트하면 바로 import 가능
+      - ./models:/app/models:ro
       - /usr/lib/python3/dist-packages/hailo_platform:/app/hailo_platform:ro
-      # libhailort.so: hailo_platform 내부 확장 모듈(_pyhailort.so)이 링크하는 C 런타임
       - /usr/lib/libhailort.so.4.20.0:/usr/lib/libhailort.so.4.20.0:ro
       - /usr/lib/libhailort.so:/usr/lib/libhailort.so:ro
 
@@ -100,7 +94,7 @@ services:
       antigravity_bridge:
         ipv4_address: 172.20.0.12
     devices:
-      - /dev/video1:/dev/video0 # CSI / USB 카메라 디바이스
+      - /dev/video0:/dev/video0
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8002/health" ]
       interval: 30s
@@ -122,18 +116,15 @@ services:
     networks:
       antigravity_bridge:
         ipv4_address: 172.20.0.14
-
     env_file:
-      - .env # .env에서 Firebase 설정 로드
+      - .env
     environment:
       - MODULE_NAME=FirebaseSyncAgent
       - DISPLAY_URL=http://display_agent:8003
       - GATEWAY_URL=http://gateway_agent:8000
-
     volumes:
-      - ./data:/app/data:rw # SQLite 큐 DB 영속화 (재시작에도 데이터 보존)
+      - ./data:/app/data:rw
       - ./firebase-credentials.json:/app/firebase-credentials.json:ro
-
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8004/health" ]
       interval: 30s
@@ -152,8 +143,6 @@ services:
     networks:
       antigravity_bridge:
         ipv4_address: 172.20.0.13
-
-    # ── X11 HDMI 디스플레이 접근 설정 ─────────────────────────────────────────
     environment:
       - MODULE_NAME=DisplayAgent
       - DISPLAY=:0
@@ -161,16 +150,12 @@ services:
       - DISPLAY_WIDTH=1920
       - DISPLAY_HEIGHT=1080
       - DISPLAY_FPS=30
-      - DISPLAY_HEADLESS=false # 실 하드웨어: false / 개발: true
-
+      - DISPLAY_HEADLESS=false
     volumes:
-      - /tmp/.X11-unix:/tmp/.X11-unix:rw # X11 소켓
-      - /home/digioptics_am01/.Xauthority:/root/.Xauthority:ro # X11 인증 쿠키
-
-    # GPU/DRM 가속 (RPi5 VideoCore VII)
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - /home/digioptics_am01/.Xauthority:/root/.Xauthority:ro
     devices:
       - /dev/dri:/dev/dri
-
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8003/health" ]
       interval: 30s
@@ -187,7 +172,7 @@ services:
     expose:
       - "8005"
     ports:
-      - "8005:8005" # 디버깅/검증용 (운영 완료 후 제거 가능)
+      - "8005:8005"
     networks:
       antigravity_bridge:
         ipv4_address: 172.20.0.15
@@ -195,42 +180,15 @@ services:
       - MODULE_NAME=DeviceMasterAgent
       - DEVICE_CACHE_PATH=/app/data/device_cache.json
       - DEVICE_CACHE_TTL_HOURS=168
-      - HOSPITAL_API_URL=http://mock_hospital_api:8006   # 실제 병원 서버로 교체 시 이 줄만 변경
-      - HOSPITAL_API_KEY=test-api-key-12345
     volumes:
-      - ./data:/app/data # 캐시 파일 영속화
+      - ./data:/app/data
       - ./firebase-credentials.json:/app/firebase-credentials.json:ro
-    depends_on:
-      - mock_hospital_api
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8005/health" ]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 15s
-
-  mock_hospital_api:
-    build:
-      context: .
-      dockerfile: Dockerfile.mock_hospital_api
-    container_name: mock_hospital_api
-    restart: unless-stopped
-    command: python -m src.mock_hospital_api.main
-    expose:
-      - "8006"
-    ports:
-      - "8006:8006" # 외부 테스트/검증용
-    networks:
-      antigravity_bridge:
-        ipv4_address: 172.20.0.16
-    environment:
-      - MODULE_NAME=MockHospitalAPI
-      - HOSPITAL_API_KEY=test-api-key-12345
-    healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8006/health" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
 
 networks:
   antigravity_bridge:

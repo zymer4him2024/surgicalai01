@@ -1,4 +1,4 @@
-import { getFirestore, collection, query, orderBy, limit, onSnapshot, where, doc, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { getFirestore, collection, query, orderBy, limit, onSnapshot, where, doc, setDoc, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { app } from "../firebase-config.js";
 import { setupAuthUI, getCurrentUser } from "../auth.js";
 
@@ -16,6 +16,8 @@ const sliderContainer = document.getElementById('slider-container');
 let unsubscribeSnapshot = null;
 let unsubscribeControl = null;
 let unsubscribeStatus = null;
+let unsubscribeCustomers = null;
+let unsubscribeDevices = null;
 let statusAgeInterval = null;
 let lastStatusUpdate = null;
 
@@ -27,6 +29,8 @@ function requireLogin() {
     if (unsubscribeSnapshot) { unsubscribeSnapshot(); unsubscribeSnapshot = null; }
     if (unsubscribeControl) { unsubscribeControl(); unsubscribeControl = null; }
     if (unsubscribeStatus) { unsubscribeStatus(); unsubscribeStatus = null; }
+    if (unsubscribeCustomers) { unsubscribeCustomers(); unsubscribeCustomers = null; }
+    if (unsubscribeDevices) { unsubscribeDevices(); unsubscribeDevices = null; }
     if (statusAgeInterval) { clearInterval(statusAgeInterval); statusAgeInterval = null; }
 }
 
@@ -38,6 +42,8 @@ function loggedIn(user) {
     initControlPanel();
     initStatusPanel();
     initTargetConfig();
+    initCustomers();
+    initDevices();
 }
 
 setupAuthUI(requireLogin, loggedIn);
@@ -327,7 +333,148 @@ function clearTarget() {
 startInspectionBtn.addEventListener('click', startInspection);
 clearTargetBtn.addEventListener('click', clearTarget);
 
+// ── Customer & Device Management ──────────────────────────────────────────────
+
+const customersTableBody = document.getElementById('customers-table-body');
+const devicesTableBody = document.getElementById('devices-table-body');
+const deviceCustomerSelect = document.getElementById('device-customer');
+
+const addCustomerBtn = document.getElementById('add-customer-btn');
+const addCustomerModal = document.getElementById('add-customer-modal');
+const closeCustomerModal = document.getElementById('close-customer-modal');
+const addCustomerForm = document.getElementById('add-customer-form');
+
+const addDeviceBtn = document.getElementById('add-device-btn');
+const addDeviceModal = document.getElementById('add-device-modal');
+const closeDeviceModal = document.getElementById('close-device-modal');
+const addDeviceForm = document.getElementById('add-device-form');
+
+let customersData = [];
+
+// Customer Listeners & Rendering
+function initCustomers() {
+    const q = query(collection(db, "customers"), orderBy("name", "asc"));
+    unsubscribeCustomers = onSnapshot(q, (snapshot) => {
+        customersData = [];
+        snapshot.forEach((doc) => {
+            customersData.push({ id: doc.id, ...doc.data() });
+        });
+        renderCustomers();
+        updateDeviceCustomerSelect();
+    }, (error) => console.error("Error fetching customers:", error));
+}
+
+function renderCustomers() {
+    if (customersData.length === 0) {
+        customersTableBody.innerHTML = '<tr><td colspan="2" class="py-4 text-center text-appleMuted italic text-xs">No customers found.</td></tr>';
+        return;
+    }
+    customersTableBody.innerHTML = customersData.map(c => `
+        <tr class="group hover:bg-white/[0.03] transition-all">
+            <td class="py-3 font-medium text-white">${c.name}</td>
+            <td class="py-3 text-appleMuted text-xs flex items-center justify-between">
+                ${c.contact}
+                <span class="text-[10px] text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity font-mono">${c.id}</span>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function updateDeviceCustomerSelect() {
+    deviceCustomerSelect.innerHTML = '<option value="" disabled selected>Select Customer</option>' +
+        customersData.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+}
+
+// Device Listeners & Rendering
+function initDevices() {
+    const q = query(collection(db, "devices"), orderBy("device_id", "asc"));
+    unsubscribeDevices = onSnapshot(q, (snapshot) => {
+        const devicesData = [];
+        snapshot.forEach((doc) => {
+            devicesData.push({ id: doc.id, ...doc.data() });
+        });
+        renderDevices(devicesData);
+    }, (error) => console.error("Error fetching devices:", error));
+}
+
+function renderDevices(devicesData) {
+    if (devicesData.length === 0) {
+        devicesTableBody.innerHTML = '<tr><td colspan="3" class="py-4 text-center text-appleMuted italic text-xs">No devices found.</td></tr>';
+        return;
+    }
+    devicesTableBody.innerHTML = devicesData.map(d => {
+        const customer = customersData.find(c => c.id === d.customer_id);
+        const customerName = customer ? customer.name : `<span class="italic text-gray-500">Unknown (${d.customer_id})</span>`;
+        return `
+        <tr class="group hover:bg-white/[0.03] transition-all">
+            <td class="py-3 font-mono font-medium text-white text-xs">${d.device_id}</td>
+            <td class="py-3 text-appleMuted text-xs">${customerName}</td>
+            <td class="py-3 text-gray-400 text-xs">${d.location}</td>
+        </tr>
+    `;
+    }).join('');
+}
+
+// Modals
+addCustomerBtn.addEventListener('click', () => addCustomerModal.classList.remove('hidden'));
+closeCustomerModal.addEventListener('click', () => addCustomerModal.classList.add('hidden'));
+addCustomerModal.addEventListener('click', (e) => { if (e.target === addCustomerModal) addCustomerModal.classList.add('hidden'); });
+
+addDeviceBtn.addEventListener('click', () => addDeviceModal.classList.remove('hidden'));
+closeDeviceModal.addEventListener('click', () => addDeviceModal.classList.add('hidden'));
+addDeviceModal.addEventListener('click', (e) => { if (e.target === addDeviceModal) addDeviceModal.classList.add('hidden'); });
+
+// Forms
+addCustomerForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = e.target.querySelector('button[type="submit"]');
+    const ogText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "Saving...";
+    try {
+        await addDoc(collection(db, "customers"), {
+            name: document.getElementById('customer-name').value.trim(),
+            contact: document.getElementById('customer-contact').value.trim(),
+            created_at: serverTimestamp()
+        });
+        e.target.reset();
+        addCustomerModal.classList.add('hidden');
+    } catch (err) {
+        console.error("Error adding customer:", err);
+        alert("Failed to add customer. See console.");
+    } finally {
+        btn.disabled = false;
+        btn.textContent = ogText;
+    }
+});
+
+addDeviceForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = e.target.querySelector('button[type="submit"]');
+    const ogText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "Registering...";
+    try {
+        await addDoc(collection(db, "devices"), {
+            device_id: document.getElementById('device-id').value.trim(),
+            customer_id: document.getElementById('device-customer').value,
+            location: document.getElementById('device-location').value.trim(),
+            status: "active",
+            registered_at: serverTimestamp()
+        });
+        e.target.reset();
+        addDeviceModal.classList.add('hidden');
+    } catch (err) {
+        console.error("Error adding device:", err);
+        alert("Failed to add device. See console.");
+    } finally {
+        btn.disabled = false;
+        btn.textContent = ogText;
+    }
+});
+
 // ── Sync Events Listener ──────────────────────────────────────────────────────
+
 
 // Fetch only mismatch/alert events for the Admin table
 function initListener() {

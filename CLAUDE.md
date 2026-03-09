@@ -40,7 +40,8 @@ All modules communicate via the Docker internal bridge network.
 | Camera Agent | `camera_agent` | `172.20.0.12` | `8002` | Internal only | 4K camera frame capture |
 | Module C (Display) | `display_agent` | `172.20.0.13` | `8003` | Internal only | HDMI HUD output (double-buffer rendering) |
 | Module D (Storage) | `firebase_sync_agent` | `172.20.0.14` | `8004` | Internal only | Async Firestore/Storage sync |
-| Device Master | `device_master_agent` | `172.20.0.15` | `8005` | Internal only | FDA standard name mapping & MDM bridge |
+| Device Master | `device_master_agent` | `172.20.0.15` | `8005` | Internal only | FDA mapping & Cloud Meta DB bridge |
+| Mock External AI | `mock_external_ai` | `172.20.0.16` | `8006` | Internal only | Simulated 3rd-party edge AI (API Mock) |
 
 ---
 
@@ -90,7 +91,12 @@ Persists data asynchronously.
 ### Device Master Agent (The "Encyclopedia")
 Translates YOLO labels to standardized product names.
 - **FDA Mapping**: `forceps` -> `Tissue Forceps, Ring (FDA Class I)`
-- **MDM Bridge**: Extensible for customer-internal product code mapping.
+- **Cloud Bridge**: Connects securely to the Digioptics Application DB to fetch latest customer-mapped catalog. Does not connect directly to Customer DB.
+
+### Mock External AI (The "Adapter Tester")
+Simulates 3rd-party edge inference for integration testing.
+- **Protocol**: HTTP/JSON (Schema intentionally differs from native Module A).
+- **Gateway Adapter**: Gateway Agent includes a translation layer (`_normalize_inference_response`) to handle external schemas.
 
 ---
 
@@ -110,6 +116,7 @@ Translates YOLO labels to standardized product names.
 | QR Flash Indicator | "QR SCANNED" banner shown for 3s at bottom center on successful QR scan. `flash_text` field added to `/hud` endpoint. |
 | QR Trigger | `/job` endpoint stores to `_pending_preset`. QR scan transitions `_pending_preset -> current_job` to start detection. |
 | One-click Launcher | `~/Desktop/SurgicalAI.desktop` double-click runs `xhost +local:` and `docker compose up -d`. |
+| 3rd Party AI Mock | Mock service (`mock_external_ai`) and Gateway adapter logic implemented and verified via local simulation. |
 
 ### Web Dashboard (Firebase Hosting & Authentication)
 Deployed on Firebase Hosting. Google Login required (enforced via `firestore.rules`).
@@ -139,6 +146,13 @@ curl http://localhost:8000/health
 
 # Access Inference (Module A) backend directly from inside network
 docker exec inference_agent curl -s -X POST http://localhost:8001/inference -F "image=@/path/test.jpg"
+
+### API & Deployment Documentation
+- [RPi Onboarding & Deployment Guide](docs/rpi_onboarding_guide.md)
+- [System Integration Architecture](docs/integration_architecture.md)
+- [3rd Party AI Inference Integration](docs/3rd_party_ai_inference_spec.md)
+- [Customer Device Master API](docs/customer_api_spec.md)
+- [Device Master Catalog & Mapping](docs/device_master_catalog_spec.md)
 ```
 
 ---
@@ -308,3 +322,4 @@ docker compose up -d <service_name>
 11. **`camera_agent` port unreachable from host (HTTP 000)**: `camera_agent:8002` is only exposed on Docker internal network (`expose`). `curl localhost:8002` from host will fail by design. Use `docker exec gateway_agent curl http://camera_agent:8002/frame` for internal testing.
 12. **Camera reconnect not detected**: USB camera reconnect requires `docker restart camera_agent`. OpenCV VideoCapture opens the device at startup and cannot detect new connections without a restart.
 13. **HDMI overlay silent death (service healthy, screen blank)**: `_render_loop()` had no exception handling — a single numpy/OpenCV error would silently kill the daemon thread while FastAPI `/health` kept responding normally. Fixed by adding try/except with consecutive error counter in `display/main.py`, and canvas bounds clamping in `display/hud.py` (`_panel_bg`, `_draw_status_text`).
+14. **`IndentationError` in Gateway Adapter**: Accidentally introduced an indentation error while injecting the `_normalize_inference_response` function into `gateway/main.py`. Resolved by reverting to git state and carefully re-applying chunks.
