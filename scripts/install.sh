@@ -346,21 +346,22 @@ if [[ "${CURRENT_PHASE}" -le 5 ]]; then
 
     # .env
     if [[ ! -f ".env" ]]; then
-        if [[ -f ".env.example" ]]; then
-            cp .env.example .env
-            success "Created .env from template"
-            warn "Edit .env to configure APP_ID, DEVICE_ID, and Firebase credentials."
-        else
-            info "Creating default .env file..."
-            cat > .env << 'ENVEOF'
+        info "Creating default .env file..."
+        cat > .env << 'ENVEOF'
 # Default Environment Variables
 APP_ID=surgical
 DEVICE_ID=rpi-01
+FIREBASE_CREDENTIALS_PATH=/app/firebase-credentials.json
 ENVEOF
-            success "Created default .env"
-        fi
+        success "Created default .env"
     else
         success ".env exists"
+    fi
+
+    # Firebase Credentials Placeholder
+    if [[ ! -f "firebase-credentials.json" ]]; then
+        echo "{}" > firebase-credentials.json
+        success "Created firebase-credentials.json placeholder"
     fi
 
     # data directory
