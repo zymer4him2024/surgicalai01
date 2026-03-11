@@ -159,7 +159,7 @@ services:
       - DISPLAY_HEADLESS=false
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
-      - /home/digioptics_am01/.Xauthority:/root/.Xauthority:ro
+      - ${HOME}/.Xauthority:/root/.Xauthority:ro
     devices:
       - /dev/dri:/dev/dri
     healthcheck:
