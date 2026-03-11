@@ -346,8 +346,19 @@ if [[ "${CURRENT_PHASE}" -le 5 ]]; then
 
     # .env
     if [[ ! -f ".env" ]]; then
-        [[ -f ".env.example" ]] && cp .env.example .env && success "Created .env from template" \
-            || warn "No .env found. Create one manually before running."
+        if [[ -f ".env.example" ]]; then
+            cp .env.example .env
+            success "Created .env from template"
+            warn "Edit .env to configure APP_ID, DEVICE_ID, and Firebase credentials."
+        else
+            info "Creating default .env file..."
+            cat > .env << 'ENVEOF'
+# Default Environment Variables
+APP_ID=surgical
+DEVICE_ID=rpi-01
+ENVEOF
+            success "Created default .env"
+        fi
     else
         success ".env exists"
     fi
