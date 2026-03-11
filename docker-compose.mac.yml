@@ -14,6 +14,8 @@ services:
     container_name: gateway_agent
     environment:
       - MODULE_NAME=GatewayAgent
+      - APP_ID=${APP_ID}
+      - DEVICE_ID=${DEVICE_ID}
       - QR_SCAN_INTERVAL_SEC=1.0
       - QR_DEBOUNCE_SEC=30.0
       - DEFAULT_TARGET={}
@@ -88,6 +90,8 @@ services:
       dockerfile: Dockerfile
     command: python -m src.camera.main
     container_name: camera_agent
+    env_file:
+      - .env
     environment:
       - MODULE_NAME=CameraAgent
       - CAMERA_INDEX=0
@@ -119,6 +123,8 @@ services:
       - .env
     environment:
       - MODULE_NAME=FirebaseSyncAgent
+      - APP_ID=${APP_ID}
+      - DEVICE_ID=${DEVICE_ID}
       - DISPLAY_URL=http://display_agent:8003
       - GATEWAY_URL=http://gateway_agent:8000
       - QUEUE_DB_PATH=/app/data/queue.db
@@ -187,6 +193,8 @@ services:
     container_name: device_master_agent
     environment:
       - MODULE_NAME=DeviceMasterAgent
+      - APP_ID=${APP_ID}
+      - DEVICE_ID=${DEVICE_ID}
       - DEVICE_CACHE_PATH=/app/data/device_cache.json
       - DEVICE_CACHE_TTL_HOURS=168
     expose:
