@@ -1,19 +1,26 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Add Docker Desktop to PATH just in case symlinks are broken
-export PATH="/Applications/Docker.app/Contents/Resources/bin:$PATH"
+# Move to the directory where this script is located (works everywhere)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "${SCRIPT_DIR}" || exit 1
 
-# Move to project directory
-cd ~/1_Antigravity/SurgicalAI01 || exit 1
-
-COMPOSE="docker compose -f docker-compose.mac.yml"
-GATEWAY="http://localhost:8000"
-
-# Fix X11 Permissions for the Display Agent
-if [ -n "${DISPLAY:-}" ]; then
-    xhost +local: > /dev/null 2>&1 || true
+# Auto-detect OS to choose the right compose file
+if [[ "$(uname -m)" == "aarch64" ]] && [[ "$(uname -s)" == "Linux" ]]; then
+    # Raspberry Pi 5 Hardware
+    COMPOSE="docker compose -f docker-compose.yml"
+    
+    # Fix X11 Permissions for the Display Agent on Pi
+    if [ -n "${DISPLAY:-}" ]; then
+        xhost +local: > /dev/null 2>&1 || true
+    fi
+else
+    # Mac / PC Simulation
+    export PATH="/Applications/Docker.app/Contents/Resources/bin:$PATH"
+    COMPOSE="docker compose -f docker-compose.mac.yml"
 fi
+
+GATEWAY="http://localhost:8000"
 
 echo "🚀 Starting Antigravity Edge Containers..."
 $COMPOSE up -d
@@ -33,4 +40,4 @@ done
 
 echo ""
 echo "✨ System is LIVE — waiting for QR scan to start detection."
-echo "   Status check: curl $GATEWAY/job/status"
+echo "   Status check: curl $GATEWAY/health"
