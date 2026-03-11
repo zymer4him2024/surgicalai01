@@ -1,7 +1,7 @@
 # Raspberry Pi 5 Deployment & Onboarding Guide
 
-**Version**: 1.0  
-**Target Device**: Raspberry Pi 5 (8GB) + Hailo-8 M.2 Module  
+**Version**: 1.0
+**Target Device**: Raspberry Pi 5 (8GB) + Hailo-8 AI Accelerator
 **Purpose**: Instructions for setting up a "blank" RPi to run the Surgical AI Gateway.
 
 ---
@@ -9,7 +9,7 @@
 ## Phase 1: Hardware Assembly
 
 1.  **RPi5 Preparation**: Ensure you have the active cooler installed on the RPi5.
-2.  **Hailo-8 Installation**: Connect the Hailo-8 M.2 Module via an M.2 HAT+ (Official RPi or quality 3rd party like Pimoroni/Waveshare).
+2.  **Hailo-8 Installation**: Connect the Hailo-8 AI Accelerator (M.2 HAT+, AI Kit, or compatible PCIe/USB module).
 3.  **Imaging**: Connect the 4K USB Camera to one of the blue USB 3.0 ports.
 4.  **Display**: Connect an HDMI cable to the Micro-HDMI port (Port 0 recommended) if local HUD is required.
 
@@ -27,18 +27,38 @@
 
 ---
 
-## Phase 3: Initial Setup & Software Installation
+## Phase 3: One-Click Installation (Recommended)
 
-Once the Pi is booted and you are logged in via SSH:
+Download and run a single file — it handles **everything** automatically:
 
-### 1. Clone the Repository
+```bash
+curl -fsSL https://raw.githubusercontent.com/zymer4him2024/surgicalai01/main/scripts/install.sh -o install.sh
+chmod +x install.sh
+./install.sh
+```
+
+The installer progresses through 6 phases and saves its state between reboots:
+
+| Phase | What it does | Reboot? |
+|---|---|---|
+| 1 | Clone the SurgicalAI repository | ❌ No |
+| 2 | Hailo-8 driver & firmware | ✅ Yes |
+| 3 | Docker CE & Compose | ❌ No |
+| 4 | CPU/PCIe/Memory tuning | ✅ Yes |
+| 5 | System verification | ❌ No |
+| 6 | .env setup & container launch | ❌ No |
+
+After each reboot, just re-run `./install.sh` from the same location and it resumes automatically.
+
+### Manual Installation (Advanced)
+
+If you prefer to run each step individually, first clone the repository:
 ```bash
 git clone https://github.com/zymer4him2024/surgicalai01.git ~/SurgicalAI01
 cd ~/SurgicalAI01
 ```
 
-### 2. Run Automation Scripts
-The repository contains four critical scripts in the `scripts/` directory. **Run them in order.**
+Then run each script in order:
 
 | Step | Script | Purpose | Reboot? |
 |---|---|---|---|
