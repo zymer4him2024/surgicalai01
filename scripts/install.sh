@@ -352,6 +352,10 @@ if [[ "${CURRENT_PHASE}" -le 5 ]]; then
 APP_ID=surgical
 DEVICE_ID=rpi-01
 FIREBASE_CREDENTIALS_PATH=/app/firebase-credentials.json
+
+# Performance Tuning (1080p prevents network/decode bottlenecks)
+CAMERA_WIDTH=1920
+CAMERA_HEIGHT=1080
 ENVEOF
         success "Created default .env"
     else
