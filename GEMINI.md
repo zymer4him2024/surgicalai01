@@ -36,12 +36,17 @@ All modules communicate via the Docker internal bridge network.
 | Module | Container Name | Fixed IP | Port | External | Description |
 |---|---|---|---|---|---|
 | Module B (Main) | `gateway_agent` | `172.20.0.10` | `8000` | `localhost:8000` | Main controller, QR decode, state machine |
-| Module A (Inference) | `inference_agent` | `172.20.0.11` | `8001` | Internal only | Hailo-8 inference (YOLOv11) |
+| Module A (Inference) | `inference_agent` | `172.20.0.11` | `8001` | Internal only | Hailo-8 inference (SurgeoNet YOLOv8m) |
 | Camera Agent | `camera_agent` | `172.20.0.12` | `8002` | Internal only | 4K camera frame capture |
-| Module C (Display) | `display_agent` | `172.20.0.13` | `8003` | Internal only | HDMI HUD output (double-buffer rendering) |
+| Module C (Display) | `display_agent` | `172.20.0.13` | `8003` | Internal only | HDMI HUD output (double-buffer rendering + bounding boxes) |
 | Module D (Storage) | `firebase_sync_agent` | `172.20.0.14` | `8004` | Internal only | Async Firestore/Storage sync |
 | Device Master | `device_master_agent` | `172.20.0.15` | `8005` | Internal only | FDA mapping & Cloud Meta DB bridge |
 | Mock External AI | `mock_external_ai` | `172.20.0.16` | `8006` | Internal only | Simulated 3rd-party edge AI (API Mock) |
+
+### Network Isolation for 3rd Party AI
+- **`antigravity_bridge`** (`172.20.0.0/16`): Internal service mesh. All Antigravity containers.
+- **`isolated_ai_bridge`** (`172.20.1.0/24`): Air-gapped network (`internal: true`) for 3rd party AI containers. No outbound internet. Gateway is dual-homed (172.20.1.10) to reach it.
+- 3rd party containers must be assigned **only** to `isolated_ai_bridge` — never `antigravity_bridge`.
 
 ---
 
@@ -120,6 +125,16 @@ Simulates 3rd-party edge inference for integration testing.
 | Label Sync (POC) | Unified instrument names across Dashboard, Inference, and Device Master (e.g., "Sur. Scissor"). |
 | HUD Update | Status text changed from "YES MATCH" to "GOOD" for matched state. |
 | Multitenancy | System supports `APP_ID` (surgical, od, inventory) and `DEVICE_ID` for isolated domain and device management. |
+| Bounding Box Overlay | Tracker-smoothed bounding boxes with label + confidence rendered on HDMI display in real time. |
+| SurgicalTracker Improvements | Class voting (10-frame majority vote suppresses jitter). Split EMA: center coordinates responsive (alpha=0.25), bbox size locked after 12 frames (alpha=0.01). |
+| CONF_THRESHOLD Tuned | Inference `CONF_THRESHOLD=0.35` (SurgeoNet). Raised from 0.20 to suppress background hallucinations; 0.55 was too aggressive (zero detections). |
+| Temperature Thresholds Raised | Gateway thermal throttle: NORMAL=75°C/12fps, WARM=82°C/5fps, HOT=88°C/2fps (was 65/75/82). Prevents false throttle at typical RPi5 operating temp ~77°C. |
+| 20-Preset Tray Rotation | TRAY-001..TRAY-020 seeded to Firestore `job_config/{DEVICE_ID}`. Each preset has named targets. Auto-advances 5s after MATCH/ERROR. |
+| Preset Format Updated | Firebase `sets[]` now supports `{"job_id": "TRAY-001", "target": {...}}` structure. `_do_load_current_set` and `_do_advance_set` both handle this. Job ID shown in DATA INFO panel. |
+| DATA INFO Panel | HDMI HUD shows active preset targets (instrument name + required count) in DATA INFO box above TRAY INFO. |
+| Network Isolation (3rd Party AI) | `isolated_ai_bridge` (`internal: true`) added to docker-compose. Gateway dual-homed. 3rd party containers air-gapped from internet. |
+| Semantic SKU Mapper | `scripts/semantic_map_skus.py`: multilingual embedding pipeline (translate → English embed → cosine similarity) maps manufacturer SKUs to SurgeoNet classes. Thresholds: AUTO=0.60, REVIEW=0.40. |
+| Manufacturer Adapters | `adapters/edlo_adapter.py`, `adapters/rhosse_adapter.py`, `adapters/bahadir_adapter.py`: normalize Edlo (PT), Rhosse (PT), Bahadir (TR/DE/EN) API responses to standard `{sku, name, manufacturer}` format. |
 
 ### Web Dashboard (Firebase Hosting & Authentication)
 Deployed on Firebase Hosting. Google Login required (enforced via `firestore.rules`).
@@ -332,3 +347,9 @@ docker compose up -d <service_name>
 18. **`permission denied while trying to connect to Docker API` in deployment script**: User was added to docker group in Phase 2 but the group is not active in the current shell session — requires re-login or `newgrp`. Fix: deployment script now calls `exec sg docker -c "bash ..."` to re-launch itself under the docker group context without requiring a logout/login cycle.
 19. **`version` attribute obsolete warning in docker-compose.yml**: Docker Compose v2.x ignores and warns about the top-level `version:` field. Removed `version: '3.8'` from `docker-compose.yml`.
 20. **One-click deployment skipped Phase 4 (DEVICE_ID prompt) on new RPi**: Copying the project folder from RPi1 to RPi2 via `scp -r` also copies `.deploy_state`, which records RPi1's completed phase. The new RPi reads it, sees Phase 6 already done, and skips all setup. Fix: state file now stores `<phase>:<hostname>`. On startup, if hostname doesn't match, the script resets to Phase 1. Manual recovery: `sed -i 's/^DEVICE_ID=.*/DEVICE_ID=<new-id>/' .env` then `docker compose up -d --force-recreate`.
+21. **`POST /frame` returning 422 (bounding boxes not showing)**: Display agent container had old `FrameUpdate` schema with `image_b64` as required field. Gateway sends detection-only payloads (no image). Fixed by making `image_b64: Optional[str] = Field(None)` in `src/display/schemas.py`.
+22. **Bounding boxes bouncing**: Gateway was forwarding `raw_dets` (unsmoothed per-frame inference). Fixed by forwarding `tracked_dets` (EMA-smoothed confirmed tracks from SurgicalTracker). Also reduced `ema_alpha` from 0.5 to 0.25 for smoother movement.
+23. **`is_confirmed` ignoring `min_hits` parameter**: Tracker had `return self.total_hits >= 3` hardcoded. Fixed to `return self.total_hits >= 2`.
+24. **`localhost:8004` unreachable from RPi host**: `firebase_sync_agent` uses `expose` not `ports` — only accessible inside Docker network. Use `docker exec gateway_agent curl -s -X POST http://firebase_sync_agent:8004/load_current_set` to trigger preset loads from RPi host.
+25. **Firestore preset not loading as job**: `/load_current_set` returns 202 immediately (fire-and-forget). Old `sets[]` format was plain target dicts; new format is `{"job_id": "TRAY-001", "target": {...}}`. Both `_do_load_current_set` and `_do_advance_set` updated to handle both formats.
+26. **Semantic mapper scores too low with multilingual embeddings**: `paraphrase-multilingual-mpnet-base-v2` clusters all surgical instruments together (domain clustering). "scalpel" ↔ "forceps" scored 0.77 (wrong). Fixed with two-stage pipeline: translate to English first (`deep-translator`), then embed English-to-English with `all-mpnet-base-v2`. Auto-mapped threshold lowered to 0.60 (reality-calibrated for surgical domain).
