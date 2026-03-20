@@ -8,7 +8,7 @@ CLAUDE.md and GEMINI.md maintain identical content for context synchronization a
 
 ## 2. Hardware Environment
 - **Edge Device**: Raspberry Pi 5 (8GB) - 64-bit OS.
-- **AI Acceleration**: Hailo-8 M.2 Module (26 TOPS) - controlled via dedicated driver inside Docker container.
+- **AI Acceleration**: Hailo-8 AI Accelerator (e.g., M.2 Module or AI Kit) - controlled via dedicated driver inside Docker container.
 - **Imaging**: 4K USB Camera (fixed focal length, high-brightness LED ring light recommended).
 - **Network**: Wi-Fi 6 or Ethernet (for Firebase real-time sync).
 
@@ -117,6 +117,9 @@ Simulates 3rd-party edge inference for integration testing.
 | QR Trigger | `/job` endpoint stores to `_pending_preset`. QR scan transitions `_pending_preset -> current_job` to start detection. |
 | One-click Launcher | `~/Desktop/SurgicalAI.desktop` double-click runs `xhost +local:` and `docker compose up -d`. |
 | 3rd Party AI Mock | Mock service (`mock_external_ai`) and Gateway adapter logic implemented and verified via local simulation. |
+| Label Sync (POC) | Unified instrument names across Dashboard, Inference, and Device Master (e.g., "Sur. Scissor"). |
+| HUD Update | Status text changed from "YES MATCH" to "GOOD" for matched state. |
+| Multitenancy | System supports `APP_ID` (surgical, od, inventory) and `DEVICE_ID` for isolated domain and device management. |
 
 ### Web Dashboard (Firebase Hosting & Authentication)
 Deployed on Firebase Hosting. Google Login required (enforced via `firestore.rules`).
@@ -161,7 +164,7 @@ docker exec inference_agent curl -s -X POST http://localhost:8001/inference -F "
 
 ### Prerequisites
 - **OS**: Raspberry Pi OS (64-bit, Debian Bookworm-based)
-- **Hardware**: Raspberry Pi 5 (8GB recommended), Hailo-8 M.2 HAT+
+- **Hardware**: Raspberry Pi 5 (8GB recommended), Hailo-8 AI Accelerator (M.2 HAT+, AI Kit, or compatible PCIe/USB module)
 - **Storage**: 32GB+ MicroSD or NVMe SSD (10GB+ free space)
 - **Network**: Internet connection required (apt packages and Docker image pulls)
 - **User Permissions**: Regular user with sudo (do not run as root)
@@ -323,3 +326,9 @@ docker compose up -d <service_name>
 12. **Camera reconnect not detected**: USB camera reconnect requires `docker restart camera_agent`. OpenCV VideoCapture opens the device at startup and cannot detect new connections without a restart.
 13. **HDMI overlay silent death (service healthy, screen blank)**: `_render_loop()` had no exception handling — a single numpy/OpenCV error would silently kill the daemon thread while FastAPI `/health` kept responding normally. Fixed by adding try/except with consecutive error counter in `display/main.py`, and canvas bounds clamping in `display/hud.py` (`_panel_bg`, `_draw_status_text`).
 14. **`IndentationError` in Gateway Adapter**: Accidentally introduced an indentation error while injecting the `_normalize_inference_response` function into `gateway/main.py`. Resolved by reverting to git state and carefully re-applying chunks.
+15. **`net::ERR_QUIC_PROTOCOL_ERROR`**: Chrome console error indicating transient network protocol timeout. Harmless; Firebase SDK automatically recovers via TCP/WebSocket fallback.
+16. **HDMI low FPS + overlay not displaying (fresh install)**: Two root causes: (a) `start_detection.sh` only ran `xhost +local:` if `$DISPLAY` was set in the current shell — SSH sessions without X11 forwarding skip this, leaving the container unable to connect to X. Fixed by always running `DISPLAY=:0 xhost +local:`. (b) Without `ipc: host` in docker-compose, the container is IPC-isolated from the host, blocking X11 MIT-SHM shared memory. OpenCV must then copy the full ~6MB frame over the X11 socket every render (~180MB/s at 30fps). Fixed by adding `ipc: host` to `display_agent` and removing `QT_X11_NO_MITSHM=1`.
+17. **`/dev/hailo0` missing after `hailo-all` install (no reboot)**: `hailortcli` and PCIe device detected but kernel module not loaded. Fix: `sudo modprobe hailo_pci` loads the module immediately without a reboot. Also add user to hailo group: `sudo usermod -aG hailo <user>`. The one-click deployment script now runs `modprobe` automatically after `setup_hailo.sh` and only reboots if `/dev/hailo0` still does not exist.
+18. **`permission denied while trying to connect to Docker API` in deployment script**: User was added to docker group in Phase 2 but the group is not active in the current shell session — requires re-login or `newgrp`. Fix: deployment script now calls `exec sg docker -c "bash ..."` to re-launch itself under the docker group context without requiring a logout/login cycle.
+19. **`version` attribute obsolete warning in docker-compose.yml**: Docker Compose v2.x ignores and warns about the top-level `version:` field. Removed `version: '3.8'` from `docker-compose.yml`.
+20. **One-click deployment skipped Phase 4 (DEVICE_ID prompt) on new RPi**: Copying the project folder from RPi1 to RPi2 via `scp -r` also copies `.deploy_state`, which records RPi1's completed phase. The new RPi reads it, sees Phase 6 already done, and skips all setup. Fix: state file now stores `<phase>:<hostname>`. On startup, if hostname doesn't match, the script resets to Phase 1. Manual recovery: `sed -i 's/^DEVICE_ID=.*/DEVICE_ID=<new-id>/' .env` then `docker compose up -d --force-recreate`.

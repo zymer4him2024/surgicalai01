@@ -1,0 +1,8 @@
+{
+  "job_id": "TEST-SURGEONET-008",
+  "target": {
+    "Sur. Scissor": 1,
+    "Lig. Clamp": 4,
+    "Peri. Clamp": 3
+  }
+}

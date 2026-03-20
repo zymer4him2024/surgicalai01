@@ -11,9 +11,8 @@ if [[ "$(uname -m)" == "aarch64" ]] && [[ "$(uname -s)" == "Linux" ]]; then
     COMPOSE="docker compose -f docker-compose.yml"
     
     # Fix X11 Permissions for the Display Agent on Pi
-    if [ -n "${DISPLAY:-}" ]; then
-        xhost +local: > /dev/null 2>&1 || true
-    fi
+    # Always use DISPLAY=:0 explicitly — $DISPLAY may be unset in SSH sessions
+    DISPLAY=:0 xhost +local: > /dev/null 2>&1 || true
 else
     # Mac / PC Simulation
     export PATH="/Applications/Docker.app/Contents/Resources/bin:$PATH"

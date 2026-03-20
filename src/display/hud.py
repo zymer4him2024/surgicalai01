@@ -59,13 +59,27 @@ PANEL_ALPHA = 0.70
 
 class HUDRenderer:
 
+    def __init__(self) -> None:
+        self._last_frame_id: int = -1
+        self._cached_resized: np.ndarray | None = None
+
     def render(self, canvas: np.ndarray, snap: _StateSnapshot) -> None:
         h, w = canvas.shape[:2]
 
         # 1) Base frame (camera feed)
         if snap.base_frame is not None:
-            resized = cv2.resize(snap.base_frame, (w, h), interpolation=cv2.INTER_LINEAR)
-            canvas[:] = resized
+            frame_id = id(snap.base_frame)
+            if frame_id != self._last_frame_id:
+                fh, fw = snap.base_frame.shape[:2]
+                if fw == w and fh == h:
+                    self._cached_resized = snap.base_frame
+                else:
+                    self._cached_resized = cv2.resize(
+                        snap.base_frame, (w, h), interpolation=cv2.INTER_LINEAR
+                    )
+                self._last_frame_id = frame_id
+            if self._cached_resized is not None:
+                canvas[:] = self._cached_resized
         else:
             canvas[:] = (18, 18, 18)
             self._draw_waiting(canvas)
@@ -291,7 +305,7 @@ class HUDRenderer:
     def _draw_status_text(canvas: np.ndarray, snap: _StateSnapshot) -> None:
         target = snap.target_border_color
         if target == BorderColor.GREEN:
-            text, color = "YES MATCH", C_OK
+            text, color = "GOOD", C_OK
         elif target == BorderColor.RED:
             text, color = "NO MATCH", C_ERR
         else:
@@ -311,7 +325,6 @@ class HUDRenderer:
             roi = canvas[y1:y2, x1:x2]
             dark = np.zeros_like(roi)
             cv2.addWeighted(dark, 0.55, roi, 0.45, 0, roi)
-            canvas[y1:y2, x1:x2] = roi
         cv2.putText(canvas, text, (x, y), FONT, scale, color, thickness, cv2.LINE_AA)
 
     # ── Persistent center prompt ──────────────────────────────────────────────
@@ -331,7 +344,6 @@ class HUDRenderer:
         roi = canvas[y1:y2, x1:x2]
         dark = np.zeros_like(roi)
         cv2.addWeighted(dark, 0.60, roi, 0.40, 0, roi)
-        canvas[y1:y2, x1:x2] = roi
         cv2.putText(canvas, text, (x, y), FONT, scale, C_WARN, thickness, cv2.LINE_AA)
 
     # ── QR flash banner (bottom center, 3s) ──────────────────────────────────
@@ -349,7 +361,6 @@ class HUDRenderer:
         roi = canvas[y1:y2, x1:x2]
         dark = np.zeros_like(roi)
         cv2.addWeighted(dark, 0.65, roi, 0.35, 0, roi)
-        canvas[y1:y2, x1:x2] = roi
         cv2.putText(canvas, text, (x, y), FONT, scale, C_WARN, thickness, cv2.LINE_AA)
 
     # ── Border (color interpolated) ───────────────────────────────────────────
@@ -376,7 +387,6 @@ class HUDRenderer:
         roi = canvas[y:y2, x:x2]
         dark = np.full_like(roi, C_PANEL)
         cv2.addWeighted(dark, PANEL_ALPHA, roi, 1 - PANEL_ALPHA, 0, roi)
-        canvas[y:y2, x:x2] = roi
         cv2.rectangle(canvas, (x, y), (x2, y2), C_PANEL_BORDER, 1)
 
     @staticmethod

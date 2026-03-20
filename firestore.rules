@@ -2,8 +2,77 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if request.auth != null;
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function validDeviceFields() {
+      let d = request.resource.data;
+      return d.device_id is string
+          && d.device_id.size() > 0
+          && d.device_id.size() <= 64
+          && d.app_id in ['surgical', 'od', 'inventory'];
+    }
+
+    // Device registry — authenticated users can read; writes require valid identity fields
+    match /devices/{deviceId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && validDeviceFields();
+      allow delete: if false;
+    }
+
+    // App Types — authenticated users can read and write
+    match /app_types/{appTypeId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Applications — authenticated users can read and write
+    match /applications/{applicationId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Models — authenticated users can read and write
+    match /models/{modelId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Projects — authenticated users can read and write
+    match /projects/{projectId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Customers — authenticated users can read and write
+    match /customers/{customerId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Sync events — backend (Admin SDK) writes only; authenticated users can read
+    match /sync_events/{eventId} {
+      allow read: if isAuthenticated();
+      allow write: if false;
+    }
+
+    // System status — backend writes only; authenticated users can read
+    match /system_status/{deviceId} {
+      allow read: if isAuthenticated();
+      allow write: if false;
+    }
+
+    // Device control — authenticated users can read and write (control panel)
+    match /device_control/{deviceId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Job config (preset cycles) — authenticated users can read and write
+    match /job_config/{deviceId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Inspection log — backend writes only; authenticated users can read
+    match /inspection_log/{deviceId} {
+      allow read: if isAuthenticated();
+      allow write: if false;
     }
   }
 }

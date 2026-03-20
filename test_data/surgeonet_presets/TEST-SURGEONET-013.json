@@ -1,0 +1,11 @@
+{
+  "job_id": "TEST-SURGEONET-013",
+  "target": {
+    "Metz. Scissor": 2,
+    "Needle Holder": 2,
+    "Hook": 4,
+    "Peri. Clamp": 1,
+    "Scalpel": 4,
+    "Tong": 3
+  }
+}

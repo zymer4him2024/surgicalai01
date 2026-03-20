@@ -13,7 +13,6 @@ Routing:
 from __future__ import annotations
 
 import asyncio
-import base64
 from datetime import datetime
 import json as _json
 import logging
@@ -43,6 +42,8 @@ logging.basicConfig(
 logger = logging.getLogger("gateway.main")
 
 MODULE_NAME = os.getenv("MODULE_NAME", "GatewayAgent")
+APP_ID = os.getenv("APP_ID", "unknown")
+DEVICE_ID = os.getenv("DEVICE_ID", "unknown")
 INFERENCE_URL = os.getenv("INFERENCE_URL", "http://inference_agent:8001")
 # For 3rd party integration, INFERENCE_ENDPOINT can be set to /predict
 INFERENCE_ENDPOINT = os.getenv("INFERENCE_ENDPOINT", "/inference")
@@ -92,11 +93,19 @@ _pending_preset: dict | None = None
 _latest_tracked_dets: list[dict] = []
 
 _tracker = SurgicalTracker(
-    max_age=8,         # ~0.7s at 12 FPS, prevents ghost counts at lower FPS
+    max_age=15,        # longer persistence between inference frames
     min_hits=2,        # faster confirmation
     iou_threshold=0.35,
-    ema_alpha=0.5,
+    ema_alpha=0.25,    # low alpha = heavy smoothing (instruments are stationary)
 )
+
+# Temperature polling throttle — fetch /metrics at most every 5s
+_last_temp_check: float = 0.0
+_TEMP_POLL_SEC = 5.0
+_last_metrics: dict = {}
+
+# Device Master label cache — FDA mappings are stable, cache indefinitely
+_device_info_cache: dict[str, dict] = {}
 
 
 def _iou_boxes(a: list[float], b: list[float]) -> float:
@@ -143,15 +152,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
     qr_task = asyncio.create_task(_qr_scan_loop())
     count_task = asyncio.create_task(_counting_loop())
-    frame_task = asyncio.create_task(_display_frame_loop())
     prompt_task = asyncio.create_task(_startup_qr_prompt())
     yield
     qr_task.cancel()
     count_task.cancel()
-    frame_task.cancel()
     prompt_task.cancel()
     try:
-        await asyncio.gather(qr_task, count_task, frame_task)
+        await asyncio.gather(qr_task, count_task)
     except asyncio.CancelledError:
         pass
     await _http_client.aclose()
@@ -185,6 +192,23 @@ from pydantic import BaseModel
 class JobRequest(BaseModel):
     job_id: str
     target: dict[str, int]
+
+
+@app.post("/job/activate", summary="[DEBUG] Directly activate pending preset without QR scan")
+async def force_activate() -> JSONResponse:
+    global _pending_preset, current_job, current_state, mismatch_start_time, last_scanned_qr
+    if not _pending_preset:
+        return JSONResponse(status_code=400, content={"error": "No pending preset. Call /job first."})
+    job = dict(_pending_preset)
+    job["scan_info"] = {**job["scan_info"], "scanned_at": datetime.now().strftime("%H:%M:%S")}
+    _pending_preset = None
+    current_job = job
+    current_state = SystemState.READY
+    mismatch_start_time = None
+    last_scanned_qr = None
+    _tracker.reset()
+    logger.info("Force-activated job: id=%r target=%s", job["id"], job["target"])
+    return JSONResponse({"status": "activated", "job_id": job["id"], "target": job["target"]})
 
 
 @app.post("/job", summary="Register new tray inspection job (QR scan simulation)")
@@ -308,7 +332,10 @@ async def _qr_scan_loop() -> None:
             def _decode():
                 nparr = np.frombuffer(image_bytes, np.uint8)
                 frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                return qr_decode(frame) if frame is not None else []
+                if frame is None:
+                    return []
+                small = cv2.resize(frame, (640, 360))
+                return qr_decode(small)
 
             results = await loop.run_in_executor(None, _decode)
             if not results:
@@ -323,13 +350,19 @@ async def _qr_scan_loop() -> None:
             last_trigger_time = now
 
             if _pending_preset is None:
-                # No preset loaded yet — request Firebase to load current set
-                logger.info("QR detected but no preset — requesting current set from Firebase")
-                try:
-                    await client().post(f"{FIREBASE_SYNC_URL}/load_current_set", timeout=3.0)
-                    await asyncio.sleep(1.5)  # wait for firebase → gateway/job to propagate
-                except Exception:
-                    pass
+                # Trigger Firebase load in background (non-blocking)
+                asyncio.create_task(
+                    client().post(f"{FIREBASE_SYNC_URL}/load_current_set", timeout=3.0)
+                )
+                # Fallback: parse target from QR content or use DEFAULT_TARGET
+                fallback_target = _parse_qr_target(qr_data)
+                job_id = f"QR-{datetime.now().strftime('%H%M%S')}"
+                _pending_preset = {
+                    "id": job_id,
+                    "target": fallback_target,
+                    "scan_info": {"job_id": job_id, "scanned_at": "", "target": fallback_target},
+                }
+                logger.info("QR fallback: no preset loaded, using target=%s", fallback_target)
 
             if _pending_preset:
                 job = dict(_pending_preset)
@@ -339,9 +372,6 @@ async def _qr_scan_loop() -> None:
                 current_state = SystemState.READY
                 mismatch_start_time = None
                 logger.info("QR detected → detection started: id=%r target=%s", job["id"], job["target"])
-            else:
-                logger.warning("QR detected but no preset available from Firebase — ignoring scan")
-                continue
 
             await client().post(
                 f"{DISPLAY_URL}/hud",
@@ -357,27 +387,6 @@ async def _qr_scan_loop() -> None:
         except Exception as e:
             logger.debug("QR loop error: %s", e)
 
-
-async def _display_frame_loop() -> None:
-    """Send camera frames to display_agent at 20 FPS (decoupled from inference loop)."""
-    INTERVAL = 0.05  # 20 FPS
-    logger.info("Display frame loop started (20 FPS)")
-    while True:
-        await asyncio.sleep(INTERVAL)
-        if not camera_active or not display_active:
-            continue
-        try:
-            resp = await client().get(f"{CAMERA_URL}/frame", timeout=2.0)
-            if resp.status_code != 200:
-                continue
-            image_b64 = base64.b64encode(resp.content).decode("utf-8")
-            await client().post(
-                f"{DISPLAY_URL}/frame",
-                json={"image_b64": image_b64, "detections": _latest_tracked_dets},
-                timeout=1.0,
-            )
-        except Exception:
-            pass
 
 
 async def _counting_loop() -> None:
@@ -395,9 +404,9 @@ async def _counting_loop() -> None:
     global current_state, mismatch_start_time, _tracked_detections, last_scanned_qr, _match_achieved_at, _error_achieved_at, current_job, _pending_preset, _latest_tracked_dets
     logger.info("Counting loop started (thermal-aware throttling enabled)")
 
-    TEMP_NORMAL = 65.0
-    TEMP_WARM = 75.0
-    TEMP_HOT = 82.0
+    TEMP_NORMAL = 75.0
+    TEMP_WARM = 82.0
+    TEMP_HOT = 88.0
 
     INTERVAL_NORMAL = 0.08
     INTERVAL_WARM = 0.2
@@ -418,13 +427,17 @@ async def _counting_loop() -> None:
             await asyncio.sleep(0.5)
             continue
 
-        # Read temps at top of cycle — throttle decision uses current readings
-        try:
-            metrics = await _fetch_json(f"{INFERENCE_URL}/metrics")
-            _last_npu_temp = float(metrics.get("npu_temp_celsius") or 0.0)
-        except Exception:
-            pass
-        _last_cpu_temp = float(_read_cpu_temp() or 0.0)
+        # Read temps at top of cycle — throttled to once every 5s
+        global _last_temp_check, _last_metrics
+        now_temp = time.monotonic()
+        if now_temp - _last_temp_check >= _TEMP_POLL_SEC:
+            try:
+                _last_metrics = await _fetch_json(f"{INFERENCE_URL}/metrics")
+                _last_npu_temp = float(_last_metrics.get("npu_temp_celsius") or 0.0)
+            except Exception:
+                pass
+            _last_cpu_temp = float(_read_cpu_temp() or 0.0)
+            _last_temp_check = now_temp
         peak_temp = max(_last_npu_temp, _last_cpu_temp)
 
         start_time = time.monotonic()
@@ -448,8 +461,6 @@ async def _counting_loop() -> None:
             if resp.status_code != 200:
                 await asyncio.sleep(0.5); continue
             image_bytes = resp.content
-
-            image_b64 = base64.b64encode(image_bytes).decode("utf-8")
 
             inf_resp = await client().post(
                 f"{INFERENCE_URL}{INFERENCE_ENDPOINT}",
@@ -485,7 +496,7 @@ async def _counting_loop() -> None:
                 if current_state != SystemState.MATCH:
                     last_scanned_qr = None
                     _match_achieved_at = time.monotonic()
-                    asyncio.create_task(_log_inspection_round("YES MATCH", enriched_items))
+                    asyncio.create_task(_log_inspection_round("GOOD", enriched_items))
                     asyncio.create_task(client().post(
                         f"{DISPLAY_URL}/hud",
                         json={"border_color": "green", "center_text": "Good"},
@@ -494,7 +505,7 @@ async def _counting_loop() -> None:
                 current_state = SystemState.MATCH
                 mismatch_start_time = None
                 if _match_achieved_at and time.monotonic() - _match_achieved_at >= HOLD_SEC:
-                    logger.info("YES MATCH held %.0fs — advancing to next set", HOLD_SEC)
+                    logger.info("GOOD status held %.0fs — advancing to next set", HOLD_SEC)
                     current_job = None
                     _pending_preset = None
                     current_state = SystemState.READY
@@ -551,6 +562,23 @@ async def _counting_loop() -> None:
             border_color = {"READY": "yellow", "MATCH": "green", "ERROR": "red"}.get(current_state, "yellow")
             tray_items = enriched_items
 
+            # Forward tracker-smoothed bboxes to display (confirmed tracks only)
+            display_dets = tracked_dets if tracked_dets else raw_dets
+            if display_active and display_dets:
+                det_payload = [
+                    {
+                        "class_name": d.get("class_name", ""),
+                        "confidence": d.get("confidence", 0.0),
+                        "bbox": d.get("bbox", [0, 0, 0, 0]),
+                    }
+                    for d in display_dets
+                ]
+                asyncio.create_task(client().post(
+                    f"{DISPLAY_URL}/frame",
+                    json={"detections": det_payload},
+                    timeout=HEALTH_TIMEOUT,
+                ))
+
             _fps_counter += 1
             fps_elapsed = time.monotonic() - _fps_start
             current_fps = _fps_counter / fps_elapsed if fps_elapsed > 0 else 0.0
@@ -564,7 +592,7 @@ async def _counting_loop() -> None:
             if display_active:
                 inf_ready = True
                 try:
-                    inf_ready = metrics.get("inference_ready", True)
+                    inf_ready = _last_metrics.get("inference_ready", True)
                 except Exception:
                     pass
 
@@ -607,12 +635,16 @@ async def _counting_loop() -> None:
 async def _enrich_with_device_info(
     actual_counts: dict[str, int],
 ) -> list[dict]:
-    """Query Device Master Agent for FDA device info in parallel. Fail-open."""
+    """Query Device Master Agent for FDA device info in parallel. Fail-open.
+    Results are cached indefinitely — FDA label mappings are stable."""
     labels = list(actual_counts.keys())
     if not labels:
         return []
 
     async def _lookup(label: str) -> dict:
+        if label in _device_info_cache:
+            cached = _device_info_cache[label]
+            return {**cached, "count": actual_counts[label]}
         fallback = {"class_name": label, "count": actual_counts[label]}
         try:
             resp = await client().get(
@@ -622,13 +654,15 @@ async def _enrich_with_device_info(
             )
             if resp.status_code == 200:
                 d = resp.json()
-                return {
+                result = {
                     "class_name": label,
                     "count": actual_counts[label],
                     "device_name": d.get("device_name"),
                     "product_code": d.get("product_code"),
                     "fda_class": d.get("device_class"),
                 }
+                _device_info_cache[label] = {k: v for k, v in result.items() if k != "count"}
+                return result
         except Exception:
             pass
         return fallback
@@ -639,8 +673,27 @@ async def _enrich_with_device_info(
 
 
 async def _startup_qr_prompt() -> None:
-    """Show 'Scan QR code' prompt after all containers have had time to start."""
+    """Show loading message immediately, then QR prompt once containers are ready."""
+    try:
+        await client().post(
+            f"{DISPLAY_URL}/hud",
+            json={
+                "border_color": "yellow",
+                "tray_items": [],
+                "center_text": "O sistema estará pronto em breve",
+            },
+            timeout=HEALTH_TIMEOUT,
+        )
+        logger.info("Startup loading prompt sent to display")
+    except Exception as exc:
+        logger.debug("Startup loading prompt failed: %s", exc)
     await asyncio.sleep(10.0)
+    # Pre-load preset from Firebase so QR scan activates immediately
+    try:
+        await client().post(f"{FIREBASE_SYNC_URL}/load_current_set", timeout=5.0)
+        logger.info("Startup preset pre-load requested from Firebase")
+    except Exception as exc:
+        logger.debug("Startup preset pre-load failed: %s", exc)
     try:
         await client().post(
             f"{DISPLAY_URL}/hud",
@@ -659,14 +712,21 @@ async def _startup_qr_prompt() -> None:
 async def _advance_to_next_set() -> None:
     """Reset display to yellow and request next set transition from Firebase Sync."""
     try:
-        await client().post(
-            f"{DISPLAY_URL}/hud",
-            json={
-                "border_color": "yellow",
-                "tray_items": [],
-                "center_text": "Por favor, escaneie o codigo QR",
-            },
-            timeout=HEALTH_TIMEOUT,
+        await asyncio.gather(
+            client().post(
+                f"{DISPLAY_URL}/hud",
+                json={
+                    "border_color": "yellow",
+                    "tray_items": [],
+                    "center_text": "Por favor, escaneie o codigo QR",
+                },
+                timeout=HEALTH_TIMEOUT,
+            ),
+            client().post(
+                f"{DISPLAY_URL}/frame",
+                json={"detections": []},
+                timeout=HEALTH_TIMEOUT,
+            ),
         )
     except Exception:
         pass
@@ -678,7 +738,7 @@ async def _advance_to_next_set() -> None:
 
 
 async def _log_inspection_round(result: str, detected_items: list[dict]) -> None:
-    """Log YES MATCH / NO MATCH result to Firestore 5-slot circular buffer."""
+    """Log GOOD / NO MATCH result to Firestore 5-slot circular buffer."""
     if not current_job:
         return
     try:
@@ -765,7 +825,12 @@ async def health_check() -> JSONResponse:
     inference_health = await _fetch_module_health(INFERENCE_URL, "inference_agent")
     camera_health = await _fetch_module_health(CAMERA_URL, "camera_agent")
     all_healthy = inference_health["reachable"] and camera_health["reachable"]
-    return JSONResponse(status_code=200, content={"status": "healthy" if all_healthy else "degraded", "modules": {"inference": inference_health, "camera": camera_health}})
+    return JSONResponse(status_code=200, content={
+        "status": "healthy" if all_healthy else "degraded",
+        "app_id": APP_ID,
+        "device_id": DEVICE_ID,
+        "modules": {"inference": inference_health, "camera": camera_health},
+    })
 
 
 @app.get("/status")

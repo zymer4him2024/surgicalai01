@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import threading
 import time
 from contextlib import asynccontextmanager
@@ -66,6 +67,41 @@ DB_PATH = os.getenv("QUEUE_DB_PATH", "/app/data/queue.db")
 WORKER_POLL_SEC = float(os.getenv("QUEUE_POLL_SEC", "5"))
 DISPLAY_URL = os.getenv("DISPLAY_URL", "http://display_agent:8003")
 GATEWAY_URL = os.getenv("GATEWAY_URL", "http://gateway_agent:8000")
+HEARTBEAT_SEC = float(os.getenv("HEARTBEAT_SEC", "30"))
+VERSION = os.getenv("VERSION", "1.0.0")
+
+# ── Device Identity ────────────────────────────────────────────────────────────
+_VALID_APP_IDS = {"surgical", "od", "inventory"}
+_DEVICE_ID_PATTERN = re.compile(r'^[a-zA-Z0-9\-]{1,64}$')
+
+APP_ID: str = os.getenv("APP_ID", "").strip()
+DEVICE_ID: str = os.getenv("DEVICE_ID", "").strip()
+
+
+def _validate_identity() -> bool:
+    """Validate APP_ID and DEVICE_ID. Returns True if both are valid."""
+    ok = True
+    if APP_ID not in _VALID_APP_IDS:
+        logger.critical(
+            "APP_ID=%r is missing or invalid. Valid values: %s. "
+            "Firestore writes are DISABLED — running in simulation mode.",
+            APP_ID, sorted(_VALID_APP_IDS),
+        )
+        ok = False
+    if not DEVICE_ID or not _DEVICE_ID_PATTERN.match(DEVICE_ID):
+        logger.critical(
+            "DEVICE_ID=%r is missing or invalid. "
+            "Must be 1-64 alphanumeric/hyphen characters. "
+            "Firestore writes are DISABLED — running in simulation mode.",
+            DEVICE_ID,
+        )
+        ok = False
+    if ok:
+        logger.info("Device identity validated — app_id=%r device_id=%r", APP_ID, DEVICE_ID)
+    return ok
+
+
+_identity_valid: bool = False
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Global instances
@@ -75,6 +111,7 @@ _queue: QueueManager
 _uploader: BaseUploader
 _http_client: httpx.AsyncClient
 _flush_event = threading.Event()
+_stop_heartbeat = threading.Event()
 _last_control_ts: float = 0.0
 _last_job_config_ts: float = 0.0
 
@@ -107,7 +144,7 @@ def _control_loop() -> None:
 
 
 async def _process_device_control() -> None:
-    """Poll Firestore device_control/rpi and relay commands to Gateway. Skipped in simulation mode."""
+    """Poll Firestore device_control/{DEVICE_ID} and relay commands to Gateway. Skipped in simulation mode."""
     global _last_control_ts
     if _uploader.simulation_mode:
         return
@@ -118,7 +155,7 @@ async def _process_device_control() -> None:
         loop = asyncio.get_event_loop()
         doc_snap = await loop.run_in_executor(
             None,
-            lambda: db.collection("device_control").document("rpi").get(),
+            lambda: db.collection("device_control").document(DEVICE_ID).get(),
         )
         if not doc_snap.exists:
             return
@@ -151,7 +188,7 @@ async def _process_device_control() -> None:
 
 
 async def _process_job_config() -> None:
-    """Poll Firestore job_config/rpi and relay first Set job to Gateway. Supports sets[] + cursor format."""
+    """Poll Firestore job_config/{DEVICE_ID} and relay preset to Gateway."""
     global _last_job_config_ts
     if _uploader.simulation_mode:
         return
@@ -163,7 +200,7 @@ async def _process_job_config() -> None:
         loop = asyncio.get_event_loop()
         doc_snap = await loop.run_in_executor(
             None,
-            lambda: db.collection("job_config").document("rpi").get(),
+            lambda: db.collection("job_config").document(DEVICE_ID).get(),
         )
         if not doc_snap.exists:
             return
@@ -202,7 +239,7 @@ async def _process_job_config() -> None:
 
 
 async def _do_advance_set() -> None:
-    """Increment Firestore job_config/rpi cursor by 1 and send next Set to Gateway."""
+    """Increment Firestore job_config/{DEVICE_ID} cursor by 1 and send next Set to Gateway."""
     if _uploader.simulation_mode:
         return
     db = getattr(_uploader, "_db", None)
@@ -213,7 +250,7 @@ async def _do_advance_set() -> None:
         loop = asyncio.get_event_loop()
 
         def _advance():
-            doc_ref = db.collection("job_config").document("rpi")
+            doc_ref = db.collection("job_config").document(DEVICE_ID)
             snap = doc_ref.get()
             if not snap.exists:
                 return None
@@ -232,12 +269,19 @@ async def _do_advance_set() -> None:
 
         sets = result["sets"]
         cursor = result["cursor"]
-        target = sets[cursor]
-        if not target:
+        entry = sets[cursor]
+        if not entry:
             return
 
         import datetime as dt
-        job_id = f"ADMIN-SET{cursor + 1}-{dt.datetime.utcnow().strftime('%H%M%S')}"
+        if isinstance(entry, dict) and "target" in entry:
+            job_id = entry.get("job_id") or f"SET{cursor + 1}-{dt.datetime.utcnow().strftime('%H%M%S')}"
+            target = entry["target"]
+        else:
+            job_id = f"SET{cursor + 1}-{dt.datetime.utcnow().strftime('%H%M%S')}"
+            target = entry
+        if not target:
+            return
         async with httpx.AsyncClient(timeout=3.0) as http:
             resp = await http.post(
                 f"{GATEWAY_URL}/job",
@@ -252,7 +296,7 @@ async def _do_advance_set() -> None:
 
 
 async def _update_system_status() -> None:
-    """Periodically sync Gateway status to Firestore system_status/rpi."""
+    """Periodically sync Gateway status to Firestore system_status/{DEVICE_ID}."""
     if _uploader.simulation_mode:
         return
     db = getattr(_uploader, "_db", None)
@@ -268,7 +312,7 @@ async def _update_system_status() -> None:
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(
             None,
-            lambda: db.collection("system_status").document("rpi").set({
+            lambda: db.collection("system_status").document(DEVICE_ID).set({
                 "inference_running": data.get("inference_running", True),
                 "camera_active": data.get("camera_active", True),
                 "display_active": data.get("display_active", True),
@@ -280,6 +324,96 @@ async def _update_system_status() -> None:
         )
     except Exception as exc:
         logger.debug("System status update error: %s", exc)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Device Registry
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def _register_device() -> None:
+    """Write/update devices/{DEVICE_ID} in Firestore. Preserves registered_at if doc exists."""
+    if _uploader.simulation_mode:
+        return
+    db = getattr(_uploader, "_db", None)
+    if db is None:
+        return
+    try:
+        from google.cloud.firestore_v1 import SERVER_TIMESTAMP  # type: ignore[import]
+        loop = asyncio.get_event_loop()
+
+        def _write():
+            doc_ref = db.collection("devices").document(DEVICE_ID)
+            existing = doc_ref.get()
+            payload: dict = {
+                "app_id": APP_ID,
+                "device_id": DEVICE_ID,
+                "status": "online",
+                "last_seen": SERVER_TIMESTAMP,
+                "version": VERSION,
+                "simulation_mode": _uploader.simulation_mode,
+            }
+            if not existing.exists:
+                payload["registered_at"] = SERVER_TIMESTAMP
+                doc_ref.set(payload)
+                logger.info("Device registered → devices/%s", DEVICE_ID)
+            else:
+                doc_ref.set(payload, merge=True)
+                logger.info("Device re-registered (online) → devices/%s", DEVICE_ID)
+
+        await loop.run_in_executor(None, _write)
+    except Exception as exc:
+        logger.warning("Device registration failed: %s", exc)
+
+
+async def _update_device_heartbeat() -> None:
+    """Update last_seen and status for devices/{DEVICE_ID}."""
+    if _uploader.simulation_mode:
+        return
+    db = getattr(_uploader, "_db", None)
+    if db is None:
+        return
+    try:
+        from google.cloud.firestore_v1 import SERVER_TIMESTAMP  # type: ignore[import]
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: db.collection("devices").document(DEVICE_ID).set(
+                {"status": "online", "last_seen": SERVER_TIMESTAMP},
+                merge=True,
+            ),
+        )
+    except Exception as exc:
+        logger.debug("Heartbeat update failed: %s", exc)
+
+
+async def _set_device_offline() -> None:
+    """Mark devices/{DEVICE_ID} status as offline on shutdown."""
+    if _uploader.simulation_mode:
+        return
+    db = getattr(_uploader, "_db", None)
+    if db is None:
+        return
+    try:
+        from google.cloud.firestore_v1 import SERVER_TIMESTAMP  # type: ignore[import]
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: db.collection("devices").document(DEVICE_ID).set(
+                {"status": "offline", "last_seen": SERVER_TIMESTAMP},
+                merge=True,
+            ),
+        )
+        logger.info("Device marked offline → devices/%s", DEVICE_ID)
+    except Exception as exc:
+        logger.debug("Device offline mark failed: %s", exc)
+
+
+def _heartbeat_loop() -> None:
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    logger.info("Heartbeat loop started (interval=%.0fs)", HEARTBEAT_SEC)
+    while not _stop_heartbeat.wait(timeout=HEARTBEAT_SEC):
+        loop.run_until_complete(_update_device_heartbeat())
 
 
 async def _process_queue() -> None:
@@ -314,10 +448,19 @@ async def _process_queue() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    global _queue, _uploader, _http_client
+    global _queue, _uploader, _http_client, _identity_valid
+
+    _identity_valid = _validate_identity()
 
     _queue = QueueManager(db_path=DB_PATH)
     _uploader = create_uploader()
+
+    # Force simulation mode if identity is invalid — prevents unidentified writes
+    if not _identity_valid and not _uploader.simulation_mode:
+        from src.firebase_sync.uploader import SimulationUploader
+        _uploader = SimulationUploader()
+        logger.critical("Identity invalid — overriding uploader to SimulationUploader")
+
     _http_client = httpx.AsyncClient(timeout=10.0)
 
     worker_thread = threading.Thread(
@@ -330,12 +473,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
     control_thread.start()
 
+    _stop_heartbeat.clear()
+    heartbeat_thread = threading.Thread(
+        target=_heartbeat_loop, name="heartbeat", daemon=True
+    )
+    heartbeat_thread.start()
+
+    await _register_device()
+
     logger.info(
-        "Firebase Sync Agent started — simulation=%s, db=%s",
-        _uploader.simulation_mode, DB_PATH,
+        "Firebase Sync Agent started — app_id=%r device_id=%r simulation=%s db=%s",
+        APP_ID, DEVICE_ID, _uploader.simulation_mode, DB_PATH,
     )
     yield
 
+    _stop_heartbeat.set()
+    await _set_device_offline()
     await _http_client.aclose()
     logger.info("Firebase Sync Agent shutdown")
 
@@ -435,7 +588,7 @@ async def _write_inspection_round(round_data: dict) -> None:
         loop = asyncio.get_event_loop()
 
         def _write():
-            doc_ref = db.collection("inspection_log").document("rpi")
+            doc_ref = db.collection("inspection_log").document(DEVICE_ID)
             snap = doc_ref.get()
             if snap.exists:
                 data = snap.to_dict()
@@ -449,10 +602,14 @@ async def _write_inspection_round(round_data: dict) -> None:
 
             slots[cursor] = {
                 **round_data,
+                "app_id": APP_ID,
+                "device_id": DEVICE_ID,
                 "slot_index": cursor,
                 "logged_at": dt.datetime.utcnow().isoformat() + "Z",
             }
             doc_ref.set({
+                "app_id": APP_ID,
+                "device_id": DEVICE_ID,
                 "slots": slots,
                 "cursor": (cursor + 1) % 5,
                 "updated_at": SERVER_TIMESTAMP,
@@ -496,7 +653,7 @@ async def _do_load_current_set() -> None:
         loop = asyncio.get_event_loop()
         doc_snap = await loop.run_in_executor(
             None,
-            lambda: db.collection("job_config").document("rpi").get(),
+            lambda: db.collection("job_config").document(DEVICE_ID).get(),
         )
         if not doc_snap.exists:
             return
@@ -504,8 +661,14 @@ async def _do_load_current_set() -> None:
         sets = data.get("sets")
         if sets:
             cursor = int(data.get("cursor", 0)) % len(sets)
-            target = sets[cursor]
-            job_id = f"SET{cursor + 1}-{dt.datetime.utcnow().strftime('%H%M%S')}"
+            entry = sets[cursor]
+            # Support {"job_id": "TRAY-001", "target": {...}} or plain target dict
+            if isinstance(entry, dict) and "target" in entry:
+                job_id = entry.get("job_id") or f"SET{cursor + 1}-{dt.datetime.utcnow().strftime('%H%M%S')}"
+                target = entry["target"]
+            else:
+                job_id = f"SET{cursor + 1}-{dt.datetime.utcnow().strftime('%H%M%S')}"
+                target = entry
         else:
             target = data.get("target", {})
             job_id = f"JOB-{dt.datetime.utcnow().strftime('%H%M%S')}"
@@ -555,7 +718,7 @@ async def health_check() -> HealthResponse:
     pending = counts.get("pending", 0) + counts.get("processing", 0)
     reachable = await _uploader.is_reachable()
     return HealthResponse(
-        status="healthy",
+        status="healthy" if _identity_valid else "degraded",
         module=MODULE_NAME,
         firebase_configured=not _uploader.simulation_mode,
         simulation_mode=_uploader.simulation_mode,

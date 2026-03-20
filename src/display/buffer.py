@@ -61,6 +61,11 @@ class DoubleBuffer:
         with self._lock:
             return self._front.copy()
 
+    def peek_front(self) -> np.ndarray:
+        """Return front buffer reference without copying.
+        Only safe to call from the render thread between flip() calls."""
+        return self._front
+
     @property
     def shape(self) -> tuple[int, int, int]:
         return self._back.shape  # type: ignore[return-value]
@@ -117,6 +122,16 @@ class DisplayState:
         frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
         with self._lock:
             self._base_frame = frame
+            self._detections = detections
+
+    def update_camera_frame(self, image_bytes: bytes) -> None:
+        arr = np.frombuffer(image_bytes, dtype=np.uint8)
+        frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        with self._lock:
+            self._base_frame = frame
+
+    def update_detections(self, detections: list[Detection]) -> None:
+        with self._lock:
             self._detections = detections
 
     def update_hud(

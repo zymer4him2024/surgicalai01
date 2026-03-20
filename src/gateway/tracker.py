@@ -44,6 +44,10 @@ def _iou(a: list[float], b: list[float]) -> float:
 # Single track
 # ─────────────────────────────────────────────────────────────────────────────
 
+_CLASS_HISTORY_LEN = 10   # majority-vote window
+_SIZE_LOCK_AGE = 12       # frames before width/height EMA is frozen
+
+
 @dataclass
 class Track:
     track_id: int
@@ -55,22 +59,54 @@ class Track:
     total_hits: int = 1     # total match count (lifetime)
     first_seen: float = field(default_factory=time.monotonic)
     last_seen: float = field(default_factory=time.monotonic)
+    class_history: list = field(default_factory=list)  # rolling class votes
 
     @property
     def is_confirmed(self) -> bool:
-        return self.total_hits >= 3
+        return self.total_hits >= 2
 
     def predict(self) -> list[float]:
         return self.bbox.copy()
 
+    def _majority_class(self) -> str:
+        if not self.class_history:
+            return self.class_name
+        return max(set(self.class_history), key=self.class_history.count)
+
     def update(self, det: dict, alpha: float = 0.6) -> None:
         new_bbox = det["bbox"]
+        x1_new, y1_new, x2_new, y2_new = new_bbox
+        x1_old, y1_old, x2_old, y2_old = self.bbox
+
+        # Center coordinates: stay responsive at full alpha
+        cx_new = (x1_new + x2_new) / 2
+        cy_new = (y1_new + y2_new) / 2
+        cx_old = (x1_old + x2_old) / 2
+        cy_old = (y1_old + y2_old) / 2
+        cx = alpha * cx_new + (1 - alpha) * cx_old
+        cy = alpha * cy_new + (1 - alpha) * cy_old
+
+        # Width/Height: freeze after object is stable (size lock)
+        w_new = x2_new - x1_new
+        h_new = y2_new - y1_new
+        w_old = x2_old - x1_old
+        h_old = y2_old - y1_old
+        size_alpha = 0.01 if self.total_hits > _SIZE_LOCK_AGE else alpha
+        w = size_alpha * w_new + (1 - size_alpha) * w_old
+        h = size_alpha * h_new + (1 - size_alpha) * h_old
+
         self.bbox = [
-            round(alpha * n + (1 - alpha) * o, 2)
-            for n, o in zip(new_bbox, self.bbox)
+            round(cx - w / 2, 2), round(cy - h / 2, 2),
+            round(cx + w / 2, 2), round(cy + h / 2, 2),
         ]
+
+        # Class voting: majority vote over last N frames
+        self.class_history.append(det["class_name"])
+        if len(self.class_history) > _CLASS_HISTORY_LEN:
+            self.class_history.pop(0)
+        self.class_name = self._majority_class()
+
         self.confidence = det["confidence"]
-        self.class_name = det["class_name"]
         self.hits += 1
         self.total_hits += 1
         self.age = 0

@@ -46,8 +46,8 @@ class TrayItem(BaseModel):
 
 
 class FrameUpdate(BaseModel):
-    """POST /frame — camera frame update (base64 encoded)"""
-    image_b64: str = Field(..., description="JPEG image as base64 string")
+    """POST /frame — camera frame update (base64 encoded image optional)"""
+    image_b64: Optional[str] = Field(None, description="JPEG image as base64 string")
     detections: list[Detection] = Field(default_factory=list)
 
 

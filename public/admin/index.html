@@ -161,6 +161,13 @@
         input:checked+.toggle-slider:before {
             transform: translateX(18px);
         }
+
+        /* Active tab state */
+        .nav-tab.active {
+            color: white;
+            background: rgba(255, 255, 255, 0.08);
+            border-left-color: #0a84ff;
+        }
     </style>
 </head>
 
@@ -230,18 +237,74 @@
                             d="M6 18L18 6M6 6l12 12" />
                     </svg>
                 </button>
-                <nav class="space-y-1 mb-10 pt-8 md:pt-0">
-                    <p class="text-[10px] font-bold uppercase tracking-widest text-gray-500 mb-4 px-2">Navigation</p>
-                    <a href="#"
-                        class="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/10 text-white font-medium text-sm border border-white/5 shadow-sm">
-                        <svg class="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <nav class="space-y-0.5 mb-6 pt-8 md:pt-0">
+                    <p class="text-[10px] font-bold uppercase tracking-widest text-gray-500 mb-3 px-2">Navigation</p>
+
+                    <a href="#" data-tab="dashboard"
+                        class="nav-tab flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all text-white bg-white/10 border-l-[3px] border-[#0a84ff]">
+                        <svg class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z">
-                            </path>
+                                d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
                         </svg>
-                        Dashboard
+                        Overview
+                    </a>
+
+                    <a href="#" data-tab="projects"
+                        class="nav-tab flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all text-gray-400 hover:text-white hover:bg-white/5 border-l-[3px] border-transparent">
+                        <svg class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
+                        </svg>
+                        Projects
+                    </a>
+
+                    <a href="#" data-tab="customers"
+                        class="nav-tab flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all text-gray-400 hover:text-white hover:bg-white/5 border-l-[3px] border-transparent">
+                        <svg class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                        </svg>
+                        Customers
+                    </a>
+
+                    <a href="#" data-tab="devices"
+                        class="nav-tab flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all text-gray-400 hover:text-white hover:bg-white/5 border-l-[3px] border-transparent">
+                        <svg class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+                        </svg>
+                        Devices
+                    </a>
+
+                    <a href="#" data-tab="models"
+                        class="nav-tab flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all text-gray-400 hover:text-white hover:bg-white/5 border-l-[3px] border-transparent">
+                        <svg class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                        </svg>
+                        Models
+                    </a>
+
+                    <a href="#" data-tab="applications"
+                        class="nav-tab flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all text-gray-400 hover:text-white hover:bg-white/5 border-l-[3px] border-transparent">
+                        <svg class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                        </svg>
+                        Applications
+                    </a>
+
+                    <a href="#" data-tab="app-types"
+                        class="nav-tab flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all text-gray-400 hover:text-white hover:bg-white/5 border-l-[3px] border-transparent">
+                        <svg class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                        </svg>
+                        App Types
                     </a>
                 </nav>
+
+                <div class="border-t border-white/10 my-2"></div>
 
                 <div class="space-y-4 mb-8">
                     <p class="text-[10px] font-bold uppercase tracking-widest text-gray-500 mb-4 px-2">System Controls
@@ -289,106 +352,253 @@
             <div class="flex-1 overflow-y-auto flex flex-col xl:flex-row custom-scrollbar">
 
                 <!-- Main Content Area -->
-                <main class="flex-1 p-6 md:p-8 space-y-8 min-w-0">
-                    <header class="mb-6">
-                        <h2 class="text-2xl font-medium tracking-wide text-white">Device Management</h2>
-                        <p class="text-sm text-gray-400 mt-1">Configure preset cycles and register new edge devices.</p>
-                    </header>
+                <main class="flex-1 min-w-0 min-h-[60vh] overflow-y-auto custom-scrollbar">
 
-                    <!-- Customer & Device Management Grid -->
-                    <section class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <!-- Customers Panel -->
-                        <div class="glass-card rounded-2xl p-6 flex flex-col h-[380px]">
+                    <!-- ── Tab: Overview ── -->
+                    <div data-panel="dashboard" class="tab-panel p-6 md:p-8 space-y-8">
+                        <header class="mb-6">
+                            <h2 class="text-2xl font-medium tracking-wide text-white">Overview</h2>
+                            <p class="text-sm text-gray-400 mt-1">Platform summary across all projects and devices.</p>
+                        </header>
+                        <!-- Summary cards placeholder — filled in Step 3 -->
+                        <div id="overview-cards" class="grid grid-cols-2 md:grid-cols-4 gap-4"></div>
+                    </div>
+
+                    <!-- ── Tab: Projects ── -->
+                    <div data-panel="projects" class="tab-panel p-6 md:p-8 space-y-8" style="display:none">
+                        <header class="mb-6">
+                            <h2 class="text-2xl font-medium tracking-wide text-white">Projects</h2>
+                            <p class="text-sm text-gray-400 mt-1">Manage deployment projects linking customers, devices, and models.</p>
+                        </header>
+                        <div class="glass-card rounded-2xl p-6 flex flex-col min-h-[400px]">
                             <div class="flex justify-between items-center mb-5 border-b border-white/10 pb-4">
                                 <h3 class="font-medium text-white flex items-center gap-2">
-                                    <svg class="w-4 h-4 text-blue-400" fill="none" viewBox="0 0 24 24"
-                                        stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                            d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4">
-                                        </path>
+                                    <svg class="w-4 h-4 text-[#0a84ff]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
                                     </svg>
-                                    Customers
+                                    All Projects
                                 </h3>
-                                <button id="add-customer-btn"
+                                <button id="add-project-btn"
                                     class="w-8 h-8 rounded-full bg-blue-500/10 text-blue-400 flex items-center justify-center hover:bg-blue-500 hover:text-white transition-all">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20"
-                                        fill="currentColor">
-                                        <path fill-rule="evenodd"
-                                            d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z"
-                                            clip-rule="evenodd" />
+                                    <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fill-rule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clip-rule="evenodd" />
                                     </svg>
                                 </button>
                             </div>
-                            <div class="overflow-y-auto flex-1 pr-2 custom-scrollbar">
+                            <div class="overflow-y-auto flex-1 custom-scrollbar">
                                 <table class="w-full text-left border-collapse text-sm">
-                                    <tbody id="customers-table-body" class="divide-y divide-white/5">
-                                        <tr>
-                                            <td colspan="2" class="py-4 text-center text-gray-500 italic text-xs">
-                                                Loading customers...</td>
-                                        </tr>
+                                    <tbody id="projects-table-body" class="divide-y divide-white/5">
+                                        <tr><td colspan="4" class="py-12 text-center text-gray-500 italic text-xs">No projects yet.</td></tr>
                                     </tbody>
                                 </table>
                             </div>
                         </div>
+                    </div>
 
-                        <!-- Devices Panel -->
-                        <div class="glass-card rounded-2xl p-6 flex flex-col h-[380px]">
+                    <!-- ── Tab: Customers ── -->
+                    <div data-panel="customers" class="tab-panel p-6 md:p-8 space-y-8" style="display:none">
+                        <header class="mb-6">
+                            <h2 class="text-2xl font-medium tracking-wide text-white">Customers</h2>
+                            <p class="text-sm text-gray-400 mt-1">Manage customer organizations.</p>
+                        </header>
+                        <div class="glass-card rounded-2xl p-6 flex flex-col min-h-[400px]">
                             <div class="flex justify-between items-center mb-5 border-b border-white/10 pb-4">
                                 <h3 class="font-medium text-white flex items-center gap-2">
-                                    <svg class="w-4 h-4 text-green-400" fill="none" stroke="currentColor"
-                                        viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                            d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z">
-                                        </path>
+                                    <svg class="w-4 h-4 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                                    </svg>
+                                    All Customers
+                                </h3>
+                                <button id="add-customer-btn"
+                                    class="w-8 h-8 rounded-full bg-blue-500/10 text-blue-400 flex items-center justify-center hover:bg-blue-500 hover:text-white transition-all">
+                                    <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fill-rule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clip-rule="evenodd" />
+                                    </svg>
+                                </button>
+                            </div>
+                            <div class="overflow-y-auto flex-1 custom-scrollbar">
+                                <table class="w-full text-left border-collapse text-sm">
+                                    <tbody id="customers-table-body" class="divide-y divide-white/5">
+                                        <tr><td colspan="5" class="py-4 text-center text-gray-500 italic text-xs">Loading customers...</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ── Tab: Devices ── -->
+                    <div data-panel="devices" class="tab-panel p-6 md:p-8 space-y-8" style="display:none">
+                        <header class="mb-6">
+                            <h2 class="text-2xl font-medium tracking-wide text-white">Devices</h2>
+                            <p class="text-sm text-gray-400 mt-1">Edge device registry. Click a device to view its live status.</p>
+                        </header>
+                        <div class="glass-card rounded-2xl p-6 flex flex-col min-h-[400px]">
+                            <div class="flex justify-between items-center mb-5 border-b border-white/10 pb-4">
+                                <h3 class="font-medium text-white flex items-center gap-2">
+                                    <svg class="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
                                     </svg>
                                     Edge Devices
                                 </h3>
                                 <button id="add-device-btn"
                                     class="w-8 h-8 rounded-full bg-green-500/10 text-green-400 flex items-center justify-center hover:bg-green-500 hover:text-white transition-all">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20"
-                                        fill="currentColor">
-                                        <path fill-rule="evenodd"
-                                            d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z"
-                                            clip-rule="evenodd" />
+                                    <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fill-rule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clip-rule="evenodd" />
                                     </svg>
                                 </button>
                             </div>
-                            <div class="overflow-y-auto flex-1 pr-2 custom-scrollbar">
+                            <div class="overflow-y-auto flex-1 custom-scrollbar">
                                 <table class="w-full text-left border-collapse text-sm">
                                     <tbody id="devices-table-body" class="divide-y divide-white/5">
-                                        <tr>
-                                            <td colspan="3" class="py-4 text-center text-gray-500 italic text-xs">
-                                                Loading devices...</td>
-                                        </tr>
+                                        <tr><td colspan="3" class="py-4 text-center text-gray-500 italic text-xs">Loading devices...</td></tr>
                                     </tbody>
                                 </table>
                             </div>
                         </div>
-                    </section>
+                    </div>
 
-                    <!-- DATA INFO Preset Cycle -->
-                    <section class="glass-card rounded-2xl p-6">
-                        <div class="flex justify-between items-center mb-5 border-b border-white/10 pb-4">
-                            <h3 class="font-medium text-white">Preset Cycle Configurations</h3>
-                            <span
-                                class="text-xs font-mono text-gray-500 bg-black/30 px-2 py-1 rounded-md">/job_config/rpi</span>
+                    <!-- ── Tab: Models ── -->
+                    <div data-panel="models" class="tab-panel p-6 md:p-8 space-y-8" style="display:none">
+                        <header class="mb-6">
+                            <h2 class="text-2xl font-medium tracking-wide text-white">Models</h2>
+                            <p class="text-sm text-gray-400 mt-1">AI model registry for all deployed inference models.</p>
+                        </header>
+                        <div class="glass-card rounded-2xl p-6 flex flex-col min-h-[400px]">
+                            <div class="flex justify-between items-center mb-5 border-b border-white/10 pb-4">
+                                <h3 class="font-medium text-white flex items-center gap-2">
+                                    <svg class="w-4 h-4 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                                    </svg>
+                                    All Models
+                                </h3>
+                                <button id="add-model-btn"
+                                    class="w-8 h-8 rounded-full bg-purple-500/10 text-purple-400 flex items-center justify-center hover:bg-purple-500 hover:text-white transition-all">
+                                    <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fill-rule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clip-rule="evenodd" />
+                                    </svg>
+                                </button>
+                            </div>
+                            <div class="overflow-y-auto flex-1 custom-scrollbar">
+                                <table class="w-full text-left border-collapse text-sm">
+                                    <tbody id="models-table-body" class="divide-y divide-white/5">
+                                        <tr><td colspan="4" class="py-12 text-center text-gray-500 italic text-xs">No models registered yet.</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
-                        <div id="preset-sets-container"
-                            class="mb-6 bg-black/20 rounded-xl border border-white/5 overflow-hidden"></div>
-                        <div class="flex items-center gap-4">
-                            <button id="start-inspection-btn" class="px-5 py-2 hidden" disabled></button>
-                            <!-- Hiding original generic button to replace with beautiful one -->
-                            <button onclick="document.getElementById('start-inspection-btn').click()"
-                                class="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white text-sm font-medium rounded-xl shadow-lg shadow-blue-500/20 transition-all transform hover:-translate-y-0.5">
-                                Generate & Start Cycle
-                            </button>
-                            <button id="clear-target-btn"
-                                class="px-5 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-sm font-medium rounded-xl transition-colors">
-                                Reset Focus
-                            </button>
-                            <span id="job-status-msg" class="text-xs text-gray-400 font-mono ml-auto"></span>
+                    </div>
+
+                    <!-- ── Tab: Applications ── -->
+                    <div data-panel="applications" class="tab-panel p-6 md:p-8 space-y-8" style="display:none">
+                        <header class="mb-6">
+                            <h2 class="text-2xl font-medium tracking-wide text-white">Applications</h2>
+                            <p class="text-sm text-gray-400 mt-1">Application configurations including preset cycles and inference thresholds.</p>
+                        </header>
+
+                        <!-- Preset Cycle (moved from flat layout) -->
+                        <section class="glass-card rounded-2xl p-6">
+                            <div class="flex justify-between items-center mb-5 border-b border-white/10 pb-4">
+                                <h3 class="font-medium text-white">Preset Cycle Configurations</h3>
+                                <span id="preset-path-label"
+                                    class="text-xs font-mono text-gray-500 bg-black/30 px-2 py-1 rounded-md">/job_config/—</span>
+                            </div>
+                            <div id="preset-sets-container"
+                                class="mb-6 bg-black/20 rounded-xl border border-white/5 overflow-hidden"></div>
+                            <div class="flex items-center gap-4">
+                                <button id="start-inspection-btn" class="px-5 py-2 hidden" disabled></button>
+                                <button onclick="document.getElementById('start-inspection-btn').click()"
+                                    class="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white text-sm font-medium rounded-xl shadow-lg shadow-blue-500/20 transition-all transform hover:-translate-y-0.5">
+                                    Generate & Start Cycle
+                                </button>
+                                <button id="clear-target-btn"
+                                    class="px-5 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-sm font-medium rounded-xl transition-colors">
+                                    Reset Focus
+                                </button>
+                                <span id="job-status-msg" class="text-xs text-gray-400 font-mono ml-auto"></span>
+                            </div>
+                        </section>
+
+                        <!-- Applications list -->
+                        <div class="glass-card rounded-2xl p-6 flex flex-col min-h-[300px]">
+                            <div class="flex justify-between items-center mb-5 border-b border-white/10 pb-4">
+                                <h3 class="font-medium text-white">All Applications</h3>
+                                <button id="add-application-btn"
+                                    class="w-8 h-8 rounded-full bg-amber-500/10 text-amber-400 flex items-center justify-center hover:bg-amber-500 hover:text-white transition-all">
+                                    <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fill-rule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clip-rule="evenodd" />
+                                    </svg>
+                                </button>
+                            </div>
+                            <div class="overflow-y-auto flex-1 custom-scrollbar">
+                                <table class="w-full text-left border-collapse text-sm">
+                                    <tbody id="applications-table-body" class="divide-y divide-white/5">
+                                        <tr><td colspan="3" class="py-12 text-center text-gray-500 italic text-xs">No applications yet.</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
-                    </section>
+                    </div>
+
+                    <!-- ── Tab: App Types ── -->
+                    <div data-panel="app-types" class="tab-panel p-6 md:p-8 space-y-8" style="display:none">
+                        <header class="mb-6">
+                            <h2 class="text-2xl font-medium tracking-wide text-white">App Types</h2>
+                            <p class="text-sm text-gray-400 mt-1">Define reusable application type templates with evaluation modes. Applications reference these types.</p>
+                        </header>
+
+                        <!-- Evaluation Mode Reference Card -->
+                        <div class="glass-card rounded-2xl p-5 border border-white/8">
+                            <p class="text-[10px] font-bold uppercase tracking-widest text-gray-500 mb-3">Evaluation Modes Reference</p>
+                            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+                                <div class="bg-black/20 rounded-xl p-3 border border-white/5">
+                                    <span class="text-xs font-bold text-[#0a84ff] font-mono">exact_count</span>
+                                    <p class="text-[10px] text-gray-500 mt-1">Detected count must equal target exactly for every class.</p>
+                                </div>
+                                <div class="bg-black/20 rounded-xl p-3 border border-white/5">
+                                    <span class="text-xs font-bold text-green-400 font-mono">minimum_count</span>
+                                    <p class="text-[10px] text-gray-500 mt-1">Detected count must be ≥ minimum for every class.</p>
+                                </div>
+                                <div class="bg-black/20 rounded-xl p-3 border border-white/5">
+                                    <span class="text-xs font-bold text-amber-400 font-mono">range_count</span>
+                                    <p class="text-[10px] text-gray-500 mt-1">Detected count must be within [min, max] per class.</p>
+                                </div>
+                                <div class="bg-black/20 rounded-xl p-3 border border-white/5">
+                                    <span class="text-xs font-bold text-purple-400 font-mono">presence_check</span>
+                                    <p class="text-[10px] text-gray-500 mt-1">Each required class must appear at least once.</p>
+                                </div>
+                                <div class="bg-black/20 rounded-xl p-3 border border-white/5">
+                                    <span class="text-xs font-bold text-rose-400 font-mono">packing_assurance</span>
+                                    <p class="text-[10px] text-gray-500 mt-1">Multi-class: each class evaluated by its own individual rule.</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- App Types List -->
+                        <div class="glass-card rounded-2xl p-6 flex flex-col min-h-[300px]">
+                            <div class="flex justify-between items-center mb-5 border-b border-white/10 pb-4">
+                                <h3 class="font-medium text-white flex items-center gap-2">
+                                    <svg class="w-4 h-4 text-teal-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/>
+                                    </svg>
+                                    All App Types
+                                </h3>
+                                <button id="add-app-type-btn"
+                                    class="w-8 h-8 rounded-full bg-teal-500/10 text-teal-400 flex items-center justify-center hover:bg-teal-500 hover:text-white transition-all">
+                                    <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fill-rule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clip-rule="evenodd"/>
+                                    </svg>
+                                </button>
+                            </div>
+                            <div class="overflow-y-auto flex-1 custom-scrollbar">
+                                <table class="w-full text-left border-collapse text-sm">
+                                    <tbody id="app-types-table-body" class="divide-y divide-white/5">
+                                        <tr><td colspan="4" class="py-12 text-center text-gray-500 italic text-xs">No app types yet.</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
 
                 </main>
 
@@ -492,26 +702,66 @@
     <!-- Add Customer Modal -->
     <div id="add-customer-modal"
         class="fixed inset-0 z-50 hidden bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-        <div class="glass-card w-full max-w-sm rounded-2xl p-6 relative">
+        <div class="glass-card w-full max-w-md rounded-2xl p-6 relative max-h-[90vh] overflow-y-auto custom-scrollbar">
             <button id="close-customer-modal"
                 class="absolute top-4 right-4 text-gray-400 hover:text-white text-2xl">&times;</button>
-            <h3 class="text-lg font-medium mb-5 text-white">Add Customer</h3>
+            <h3 id="customer-modal-title" class="text-lg font-medium mb-1 text-white">Add Customer</h3>
+            <p class="text-xs text-gray-500 mb-5">Register a new customer organization.</p>
             <form id="add-customer-form" class="space-y-4">
                 <div>
-                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Customer
-                        Name</label>
-                    <input type="text" id="customer-name" required
-                        class="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-blue-500 focus:bg-white/5 transition-all">
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Organization Name</label>
+                    <input type="text" id="customer-name" placeholder="e.g. Seoul National University Hospital" required
+                        class="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-blue-500 focus:bg-white/5 transition-all placeholder:text-gray-600">
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Contact Name</label>
+                        <input type="text" id="customer-contact-name" placeholder="e.g. Dr. Kim Jisu"
+                            class="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-blue-500 focus:bg-white/5 transition-all placeholder:text-gray-600">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Phone</label>
+                        <input type="tel" id="customer-phone" placeholder="e.g. +82-2-2072-2114"
+                            class="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-blue-500 focus:bg-white/5 transition-all placeholder:text-gray-600">
+                    </div>
                 </div>
                 <div>
-                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Contact
-                        Email</label>
-                    <input type="email" id="customer-contact" required
-                        class="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-blue-500 focus:bg-white/5 transition-all">
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Contact Email</label>
+                    <input type="email" id="customer-contact" placeholder="e.g. contact@hospital.org" required
+                        class="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-blue-500 focus:bg-white/5 transition-all placeholder:text-gray-600">
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Industry</label>
+                        <select id="customer-industry"
+                            class="w-full bg-black/60 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-blue-500 transition-all cursor-pointer">
+                            <option value="hospital">Hospital</option>
+                            <option value="clinic">Clinic</option>
+                            <option value="pharma">Pharma</option>
+                            <option value="medical_device">Medical Device</option>
+                            <option value="research">Research</option>
+                            <option value="manufacturing">Manufacturing</option>
+                            <option value="other">Other</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Country</label>
+                        <input type="text" id="customer-country" placeholder="e.g. South Korea"
+                            class="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-blue-500 focus:bg-white/5 transition-all placeholder:text-gray-600">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Address</label>
+                    <input type="text" id="customer-address" placeholder="e.g. 101 Daehak-ro, Jongno-gu, Seoul"
+                        class="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-blue-500 focus:bg-white/5 transition-all placeholder:text-gray-600">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Notes <span class="normal-case font-normal text-gray-600">(optional)</span></label>
+                    <textarea id="customer-notes" rows="2" placeholder="Additional notes..."
+                        class="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-blue-500 focus:bg-white/5 transition-all placeholder:text-gray-600 resize-none"></textarea>
                 </div>
                 <button type="submit"
-                    class="w-full bg-blue-500 text-white text-sm font-medium py-2.5 rounded-xl hover:bg-blue-600 transition-colors mt-2 shadow-lg shadow-blue-500/20">Save
-                    Customer</button>
+                    class="w-full bg-blue-500 text-white text-sm font-medium py-2.5 rounded-xl hover:bg-blue-600 transition-colors mt-2 shadow-lg shadow-blue-500/20">Save Customer</button>
             </form>
         </div>
     </div>
@@ -522,12 +772,12 @@
         <div class="glass-card w-full max-w-sm rounded-2xl p-6 relative">
             <button id="close-device-modal"
                 class="absolute top-4 right-4 text-gray-400 hover:text-white text-2xl">&times;</button>
-            <h3 class="text-lg font-medium mb-5 text-white">Register Device</h3>
+            <h3 id="device-modal-title" class="text-lg font-medium mb-5 text-white">Register Device</h3>
             <form id="add-device-form" class="space-y-4">
                 <div>
                     <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Device
                         ID</label>
-                    <input type="text" id="device-id" placeholder="e.g. rpi-01" required
+                    <input type="text" id="device-id-input" placeholder="e.g. rpi-01" required
                         class="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-green-500 focus:bg-white/5 transition-all font-mono placeholder:text-gray-600">
                 </div>
                 <div>
@@ -551,24 +801,369 @@
         </div>
     </div>
 
+    <!-- Create App Type Modal -->
+    <div id="add-app-type-modal"
+        class="fixed inset-0 z-50 hidden bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+        <div class="glass-card w-full max-w-md rounded-2xl p-6 relative">
+            <button id="close-app-type-modal"
+                class="absolute top-4 right-4 text-gray-400 hover:text-white text-2xl">&times;</button>
+            <h3 id="app-type-modal-title" class="text-lg font-medium mb-1 text-white">Create App Type</h3>
+            <p class="text-xs text-gray-500 mb-5">Define a named template. Applications reference this type to inherit its evaluation behavior.</p>
+            <form id="add-app-type-form" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Type Name</label>
+                    <input type="text" id="app-type-name" placeholder="e.g. 5-Part Packing Check" required
+                        class="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-teal-500 focus:bg-white/5 transition-all placeholder:text-gray-600">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Domain</label>
+                    <select id="app-type-app-id" required
+                        class="w-full bg-black/60 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-teal-500 transition-all cursor-pointer">
+                        <option value="" disabled selected>Select domain</option>
+                        <option value="surgical">Surgical</option>
+                        <option value="od">Object Detection</option>
+                        <option value="inventory">Inventory</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Evaluation Mode</label>
+                    <select id="app-type-eval-mode" required
+                        class="w-full bg-black/60 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-teal-500 transition-all cursor-pointer">
+                        <option value="" disabled selected>Select mode</option>
+                        <option value="exact_count">exact_count — detected == target per class</option>
+                        <option value="minimum_count">minimum_count — detected ≥ min per class</option>
+                        <option value="range_count">range_count — min ≤ detected ≤ max per class</option>
+                        <option value="presence_check">presence_check — each class appears ≥ 1</option>
+                        <option value="packing_assurance">packing_assurance — per-class individual rules</option>
+                    </select>
+                    <p id="eval-mode-hint" class="text-[10px] text-gray-500 mt-1.5 min-h-[14px]"></p>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Description <span class="normal-case font-normal text-gray-600">(optional)</span></label>
+                    <textarea id="app-type-description" rows="2" placeholder="Describe when to use this type..."
+                        class="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-teal-500 focus:bg-white/5 transition-all placeholder:text-gray-600 resize-none"></textarea>
+                </div>
+                <button type="submit"
+                    class="w-full bg-teal-500 text-black text-sm font-medium py-2.5 rounded-xl hover:bg-teal-400 transition-colors mt-2 shadow-lg shadow-teal-500/20">
+                    Create App Type
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Create Application Modal -->
+    <div id="add-application-modal"
+        class="fixed inset-0 z-50 hidden bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+        <div class="glass-card w-full max-w-md rounded-2xl p-6 relative max-h-[90vh] overflow-y-auto custom-scrollbar">
+            <button id="close-application-modal"
+                class="absolute top-4 right-4 text-gray-400 hover:text-white text-2xl">&times;</button>
+            <h3 id="application-modal-title" class="text-lg font-medium mb-1 text-white">Create Application</h3>
+            <p class="text-xs text-gray-500 mb-5">Register an application and link it to an AI model.</p>
+            <form id="add-application-form" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Name</label>
+                    <input type="text" id="app-name" placeholder="e.g. Surgical Counting — OR1" required
+                        class="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-amber-500 focus:bg-white/5 transition-all placeholder:text-gray-600">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Description</label>
+                    <input type="text" id="app-description" placeholder="Optional"
+                        class="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-amber-500 focus:bg-white/5 transition-all placeholder:text-gray-600">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Model</label>
+                    <select id="app-model-id"
+                        class="w-full bg-black/60 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-amber-500 transition-all cursor-pointer">
+                        <option value="">None</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Remarks</label>
+                    <textarea id="app-remarks" rows="3" placeholder="Optional notes"
+                        class="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-amber-500 focus:bg-white/5 transition-all placeholder:text-gray-600 resize-none"></textarea>
+                </div>
+                <button type="submit"
+                    class="w-full bg-amber-500 text-black text-sm font-medium py-2.5 rounded-xl hover:bg-amber-400 transition-colors mt-2 shadow-lg shadow-amber-500/20">
+                    Create Application
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Create Model Modal -->
+    <div id="add-model-modal"
+        class="fixed inset-0 z-50 hidden bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+        <div class="glass-card w-full max-w-md rounded-2xl p-6 relative max-h-[90vh] overflow-y-auto custom-scrollbar">
+            <button id="close-model-modal"
+                class="absolute top-4 right-4 text-gray-400 hover:text-white text-2xl">&times;</button>
+            <h3 id="model-modal-title" class="text-lg font-medium mb-1 text-white">Register Model</h3>
+            <p class="text-xs text-gray-500 mb-5">Add an AI inference model to the registry.</p>
+            <form id="add-model-form" class="space-y-4">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Name</label>
+                        <input type="text" id="model-name" placeholder="e.g. SurgeoNet v2" required
+                            class="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-purple-500 focus:bg-white/5 transition-all placeholder:text-gray-600">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Version</label>
+                        <input type="text" id="model-version" placeholder="e.g. 1.0.0" required
+                            class="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-purple-500 focus:bg-white/5 transition-all placeholder:text-gray-600 font-mono">
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Type</label>
+                        <select id="model-type" required
+                            class="w-full bg-black/60 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-purple-500 transition-all cursor-pointer">
+                            <option value="internal">Internal</option>
+                            <option value="3rd_party">3rd Party</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Framework</label>
+                        <select id="model-framework" required
+                            class="w-full bg-black/60 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-purple-500 transition-all cursor-pointer">
+                            <option value="yolov8">YOLOv8</option>
+                            <option value="yolov5">YOLOv5</option>
+                            <option value="custom">Custom</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Input Resolution</label>
+                        <input type="number" id="model-input-resolution" placeholder="640" min="1" required
+                            class="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-purple-500 focus:bg-white/5 transition-all placeholder:text-gray-600 font-mono">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Class Count</label>
+                        <input type="number" id="model-class-count" placeholder="80" min="1" required
+                            class="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-purple-500 focus:bg-white/5 transition-all placeholder:text-gray-600 font-mono">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">HEF Path</label>
+                    <input type="text" id="model-hef-path" placeholder="e.g. /app/models/yolov8n.hef"
+                        class="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-purple-500 focus:bg-white/5 transition-all placeholder:text-gray-600 font-mono">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">
+                        Class Labels <span class="normal-case font-normal text-gray-600">(comma-separated)</span>
+                    </label>
+                    <textarea id="model-class-labels" rows="3" placeholder="person, bicycle, car, ..."
+                        class="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-purple-500 focus:bg-white/5 transition-all placeholder:text-gray-600 font-mono resize-none"></textarea>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Status</label>
+                    <select id="model-status"
+                        class="w-full bg-black/60 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-purple-500 transition-all cursor-pointer">
+                        <option value="active">Active</option>
+                        <option value="deprecated">Deprecated</option>
+                    </select>
+                </div>
+                <button type="submit"
+                    class="w-full bg-purple-500 text-white text-sm font-medium py-2.5 rounded-xl hover:bg-purple-600 transition-colors mt-2 shadow-lg shadow-purple-500/20">
+                    Register Model
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Create Project Modal -->
+    <div id="add-project-modal"
+        class="fixed inset-0 z-50 hidden bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+        <div class="glass-card w-full max-w-md rounded-2xl p-6 relative">
+            <button id="close-project-modal"
+                class="absolute top-4 right-4 text-gray-400 hover:text-white text-2xl">&times;</button>
+            <h3 id="project-modal-title" class="text-lg font-medium mb-1 text-white">Create Project</h3>
+            <p class="text-xs text-gray-500 mb-5">Link a customer, devices, and AI model under one project.</p>
+            <form id="add-project-form" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Project Name</label>
+                    <input type="text" id="project-name" placeholder="e.g. Seoul General Hospital OR-1" required
+                        class="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-blue-500 focus:bg-white/5 transition-all placeholder:text-gray-600">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Description</label>
+                    <input type="text" id="project-description" placeholder="Optional"
+                        class="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-blue-500 focus:bg-white/5 transition-all placeholder:text-gray-600">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Application Type</label>
+                    <select id="project-app-id" required
+                        class="w-full bg-black/60 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-blue-500 transition-all cursor-pointer">
+                        <option value="" disabled selected>Select type</option>
+                        <option value="surgical">Surgical</option>
+                        <option value="od">Object Detection</option>
+                        <option value="inventory">Inventory</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Customer</label>
+                    <select id="project-customer-id"
+                        class="w-full bg-black/60 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-blue-500 transition-all cursor-pointer">
+                        <option value="">None</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Devices <span class="text-gray-600 font-normal normal-case">(hold ⌘/Ctrl to select multiple)</span></label>
+                    <select id="project-device-ids" multiple
+                        class="w-full bg-black/60 border border-white/10 rounded-xl px-4 py-2 text-sm text-white outline-none focus:border-blue-500 transition-all cursor-pointer min-h-[80px]">
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">AI Model</label>
+                    <select id="project-model-id"
+                        class="w-full bg-black/60 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-blue-500 transition-all cursor-pointer">
+                        <option value="">None</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Application</label>
+                    <select id="project-application-id"
+                        class="w-full bg-black/60 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-blue-500 transition-all cursor-pointer">
+                        <option value="">None</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Status</label>
+                    <select id="project-status"
+                        class="w-full bg-black/60 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-blue-500 transition-all cursor-pointer">
+                        <option value="active">Active</option>
+                        <option value="paused">Paused</option>
+                        <option value="archived">Archived</option>
+                    </select>
+                </div>
+                <button type="submit"
+                    class="w-full bg-[#0a84ff] text-white text-sm font-medium py-2.5 rounded-xl hover:bg-blue-500 transition-colors mt-2 shadow-lg shadow-blue-500/20">
+                    Create Project
+                </button>
+            </form>
+        </div>
+    </div>
+
     <script>
-        // Simple mobile menu toggle logic
-        document.addEventListener('DOMContentLoaded', () => {
-            const btn = document.getElementById('mobile-menu-btn');
-            const closeBtn = document.getElementById('close-mobile-menu');
-            const sidebar = document.getElementById('sidebar');
-            const overlay = document.getElementById('sidebar-overlay');
+        // Script is at bottom of body — DOM is ready, no DOMContentLoaded needed
+        (function () {
+            var sidebar = document.getElementById('sidebar');
+            var overlay = document.getElementById('sidebar-overlay');
+            var btn = document.getElementById('mobile-menu-btn');
+            var closeBtn = document.getElementById('close-mobile-menu');
+            var mainEl = document.querySelector('main');
 
             function toggleMenu() {
                 if (sidebar) sidebar.classList.toggle('-translate-x-full');
                 if (overlay) overlay.classList.toggle('hidden');
             }
-
             if (btn) btn.addEventListener('click', toggleMenu);
             if (closeBtn) closeBtn.addEventListener('click', toggleMenu);
             if (overlay) overlay.addEventListener('click', toggleMenu);
-        });
+
+            var tabs = document.querySelectorAll('.nav-tab');
+            var panels = document.querySelectorAll('.tab-panel');
+
+            function switchTab(tabId) {
+                tabs.forEach(function (t) {
+                    var isActive = t.dataset.tab === tabId;
+                    if (isActive) {
+                        t.classList.add('active');
+                        t.style.color = 'white';
+                        t.style.background = 'rgba(255,255,255,0.08)';
+                        t.style.borderLeftColor = '#0a84ff';
+                    } else {
+                        t.classList.remove('active');
+                        t.style.color = '';
+                        t.style.background = '';
+                        t.style.borderLeftColor = 'transparent';
+                    }
+                });
+                panels.forEach(function (p) {
+                    p.style.display = (p.dataset.panel === tabId) ? 'block' : 'none';
+                });
+                if (mainEl) mainEl.scrollTop = 0;
+            }
+
+            tabs.forEach(function (tab) {
+                tab.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    switchTab(tab.dataset.tab);
+                    if (sidebar) {
+                        sidebar.classList.add('-translate-x-full');
+                        if (overlay) overlay.classList.add('hidden');
+                    }
+                });
+            });
+
+            switchTab('dashboard');
+        })();
     </script>
+    <!-- Project Detail Modal -->
+    <div id="project-detail-modal" style="display:none" class="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" id="project-detail-backdrop"></div>
+        <div class="relative w-full max-w-2xl glass-panel rounded-2xl border border-white/10 shadow-2xl overflow-hidden">
+            <!-- Header -->
+            <div class="flex items-start justify-between p-6 border-b border-white/8">
+                <div>
+                    <h2 id="pd-name" class="text-lg font-semibold text-white"></h2>
+                    <p id="pd-desc" class="text-xs text-gray-500 mt-0.5"></p>
+                </div>
+                <button id="close-project-detail" class="ml-4 flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition-colors">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <!-- Cards grid -->
+            <div class="p-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <!-- Customer -->
+                <div class="glass-card rounded-xl p-4">
+                    <div class="flex items-center gap-2 mb-3">
+                        <span class="w-6 h-6 rounded-md bg-[#0a84ff]/20 flex items-center justify-center">
+                            <svg class="w-3.5 h-3.5 text-[#0a84ff]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-2 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
+                        </span>
+                        <span class="text-[9px] font-bold uppercase tracking-widest text-gray-500">Customer</span>
+                    </div>
+                    <div id="pd-customer" class="space-y-1"></div>
+                </div>
+                <!-- Devices -->
+                <div class="glass-card rounded-xl p-4">
+                    <div class="flex items-center gap-2 mb-3">
+                        <span class="w-6 h-6 rounded-md bg-purple-500/20 flex items-center justify-center">
+                            <svg class="w-3.5 h-3.5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18"/></svg>
+                        </span>
+                        <span class="text-[9px] font-bold uppercase tracking-widest text-gray-500">Devices</span>
+                    </div>
+                    <div id="pd-devices" class="space-y-1"></div>
+                </div>
+                <!-- AI Model -->
+                <div class="glass-card rounded-xl p-4">
+                    <div class="flex items-center gap-2 mb-3">
+                        <span class="w-6 h-6 rounded-md bg-emerald-500/20 flex items-center justify-center">
+                            <svg class="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17H3a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v10a2 2 0 01-2 2h-2"/></svg>
+                        </span>
+                        <span class="text-[9px] font-bold uppercase tracking-widest text-gray-500">AI Model</span>
+                    </div>
+                    <div id="pd-model" class="space-y-1"></div>
+                </div>
+                <!-- Application -->
+                <div class="glass-card rounded-xl p-4">
+                    <div class="flex items-center gap-2 mb-3">
+                        <span class="w-6 h-6 rounded-md bg-orange-500/20 flex items-center justify-center">
+                            <svg class="w-3.5 h-3.5 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/></svg>
+                        </span>
+                        <span class="text-[9px] font-bold uppercase tracking-widest text-gray-500">Application</span>
+                    </div>
+                    <div id="pd-application" class="space-y-1"></div>
+                </div>
+            </div>
+            <!-- Footer badges -->
+            <div class="px-6 pb-5 flex items-center gap-2 flex-wrap">
+                <span id="pd-status-badge" class="status-badge border"></span>
+                <span id="pd-app-badge" class="status-badge border"></span>
+                <span id="pd-created" class="text-[10px] text-gray-600 font-mono ml-auto"></span>
+            </div>
+        </div>
+    </div>
+
     <script type="module" src="app.js"></script>
 </body>
 

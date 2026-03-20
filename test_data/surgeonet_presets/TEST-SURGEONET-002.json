@@ -1,0 +1,7 @@
+{
+  "job_id": "TEST-SURGEONET-002",
+  "target": {
+    "Retractor": 4,
+    "Needle Holder": 3
+  }
+}

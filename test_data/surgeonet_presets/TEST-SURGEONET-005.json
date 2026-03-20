@@ -1,0 +1,11 @@
+{
+  "job_id": "TEST-SURGEONET-005",
+  "target": {
+    "Peri. Clamp": 3,
+    "Overholt Clamp": 1,
+    "Needle Holder": 4,
+    "Bowl": 1,
+    "Tong": 3,
+    "Scalpel": 3
+  }
+}

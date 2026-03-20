@@ -1,0 +1,11 @@
+{
+  "job_id": "TEST-SURGEONET-017",
+  "target": {
+    "Hook": 3,
+    "Peri. Clamp": 1,
+    "Scalpel": 4,
+    "Bowl": 2,
+    "Sur. Scissor": 2,
+    "Atr. Forceps": 2
+  }
+}

@@ -25,51 +25,33 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# COCO 80-class labels (YOLOv8 default model — POC demo)
+# SurgeoNet 14-class labels (surgeonet_416.hef — trained on surgical instruments)
+# class 0 = Background (filtered out)
 # ─────────────────────────────────────────────────────────────────────────────
 DEFAULT_CLASS_NAMES: list[str] = [
-    "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train",
-    "truck", "boat", "traffic light", "fire hydrant", "stop sign",
-    "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep",
-    "cow", "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella",
-    "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard",
-    "sports ball", "kite", "baseball bat", "baseball glove", "skateboard",
-    "surfboard", "tennis racket", "bottle", "wine glass", "cup", "fork",
-    "knife", "spoon", "bowl", "banana", "apple", "sandwich", "orange",
-    "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair",
-    "couch", "potted plant", "bed", "dining table", "toilet", "tv",
-    "laptop", "mouse", "remote", "keyboard", "cell phone", "microwave",
-    "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase",
-    "scissors", "teddy bear", "hair drier", "toothbrush",
+    "Background",
+    "Overholt Clamp",
+    "Metz. Scissor",
+    "Sur. Scissor",
+    "Needle Holder",
+    "Sur. Forceps",
+    "Atr. Forceps",
+    "Scalpel",
+    "Retractor",
+    "Hook",
+    "Lig. Clamp",
+    "Peri. Clamp",
+    "Bowl",
+    "Tong",
 ]
 
-# ─────────────────────────────────────────────────────────────────────────────
-# POC mapping: COCO class → surgical instrument name
-# Only classes in this mapping are shown in the display.
-# ─────────────────────────────────────────────────────────────────────────────
-SURGICAL_MAPPING: dict[str, str] = {
-    "scissors": "Surgical Scissors",
-    "knife": "Scalpel",
-    "fork": "Forceps",
-    "spoon": "Retractor",
-    "bowl": "Bowl",
-    "cup": "Container",
-    "bottle": "Bottle",
-    "cell phone": "Probe Device",
-    "remote": "Cautery Pen",
-    "toothbrush": "Brush",
-}
-
-# Model input resolution (YOLOv8: 640x640)
-INPUT_SIZE = 640
-SKIP_BACKGROUND = False
+# Model input resolution — SurgeoNet HEF: 416x416
+INPUT_SIZE = 416
+SKIP_BACKGROUND = True
 
 # NMS parameters
-CONF_THRESHOLD = 0.50
+CONF_THRESHOLD = 0.35
 IOU_THRESHOLD = 0.45
-
-# COCO model has no Background class
-SKIP_BACKGROUND = False
 
 # Flag to log output structure once on first inference
 _hailo_output_logged = False
@@ -80,19 +62,8 @@ _hailo_output_logged = False
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _apply_surgical_mapping(detections: list[dict]) -> list[dict]:
-    """Convert COCO detection results to surgical instrument names.
-    Classes not in SURGICAL_MAPPING are dropped entirely.
-    """
-    mapped = []
-    for det in detections:
-        coco_name = det.get("class_name", "")
-        if coco_name in SURGICAL_MAPPING:
-            mapped.append({
-                **det,
-                "class_name": SURGICAL_MAPPING[coco_name],
-                "coco_class": coco_name,  # preserve original COCO name
-            })
-    return mapped
+    """Pass-through — all COCO detections forwarded until SurgeoNet HEF is available."""
+    return detections
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -282,6 +253,8 @@ def _run_hailo_inference(image_bytes: bytes, log: logging.Logger) -> list[dict]:
         raw_dets = []
         batch = ragged_nms[0] if len(ragged_nms) > 0 else []
         for class_id, class_dets in enumerate(batch):
+            if SKIP_BACKGROUND and class_id == 0:
+                continue
             if class_id >= num_classes:
                 continue
             class_arr = np.asarray(class_dets)

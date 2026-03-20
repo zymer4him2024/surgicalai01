@@ -1,0 +1,8 @@
+{
+  "job_id": "TEST-SURGEONET-010",
+  "target": {
+    "Atr. Forceps": 2,
+    "Hook": 4,
+    "Lig. Clamp": 3
+  }
+}

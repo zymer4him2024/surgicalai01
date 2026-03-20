@@ -1,0 +1,10 @@
+{
+  "job_id": "TEST-SURGEONET-003",
+  "target": {
+    "Atr. Forceps": 4,
+    "Retractor": 2,
+    "Metz. Scissor": 4,
+    "Peri. Clamp": 4,
+    "Needle Holder": 2
+  }
+}

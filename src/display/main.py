@@ -29,6 +29,7 @@ from typing import AsyncGenerator
 
 import cv2
 import numpy as np
+import requests
 import uvicorn
 from fastapi import FastAPI, HTTPException, status
 from fastapi.responses import JSONResponse, Response
@@ -55,6 +56,7 @@ MODULE_NAME = os.getenv("MODULE_NAME", "DisplayAgent")
 DISPLAY_W = int(os.getenv("DISPLAY_WIDTH", "1920"))
 DISPLAY_H = int(os.getenv("DISPLAY_HEIGHT", "1080"))
 TARGET_FPS = int(os.getenv("DISPLAY_FPS", "30"))
+CAMERA_URL = os.getenv("CAMERA_URL", "")
 WINDOW_NAME = "SurgicalAI"
 
 HEADLESS: bool = (
@@ -70,6 +72,7 @@ _state = DisplayState()
 _buffer = DoubleBuffer(DISPLAY_W, DISPLAY_H)
 _hud = HUDRenderer()
 _render_thread: threading.Thread | None = None
+_camera_thread: threading.Thread | None = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -108,8 +111,7 @@ def _render_loop() -> None:
             _buffer.flip()
 
             if not HEADLESS:
-                front = _buffer.get_front()
-                cv2.imshow(WINDOW_NAME, front)
+                cv2.imshow(WINDOW_NAME, _buffer.peek_front())
                 key = cv2.waitKey(1) & 0xFF
                 if key == 27:  # ESC
                     _state.stop_requested = True
@@ -149,20 +151,51 @@ def _render_loop() -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Camera pull thread (direct camera → display, bypasses gateway)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _camera_pull_loop() -> None:
+    if not CAMERA_URL:
+        logger.info("CAMERA_URL not set — camera pull disabled")
+        return
+    interval = 1.0 / TARGET_FPS
+    session = requests.Session()
+    logger.info("Camera pull thread started — %s (target %dfps)", CAMERA_URL, TARGET_FPS)
+    while not _state.stop_requested:
+        t0 = time.monotonic()
+        try:
+            resp = session.get(f"{CAMERA_URL}/frame", timeout=2.0)
+            if resp.status_code == 200:
+                _state.update_camera_frame(resp.content)
+        except Exception:
+            pass
+        elapsed = time.monotonic() - t0
+        sleep = interval - elapsed
+        if sleep > 0:
+            time.sleep(sleep)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # FastAPI lifespan
 # ─────────────────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    global _render_thread
+    global _render_thread, _camera_thread
 
     _render_thread = threading.Thread(
         target=_render_loop, name="render-loop", daemon=True
     )
     _render_thread.start()
+
+    _camera_thread = threading.Thread(
+        target=_camera_pull_loop, name="camera-pull", daemon=True
+    )
+    _camera_thread.start()
+
     logger.info(
-        "Display Agent started — headless=%s, resolution=%dx%d, target_fps=%d",
-        HEADLESS, DISPLAY_W, DISPLAY_H, TARGET_FPS,
+        "Display Agent started — headless=%s, resolution=%dx%d, target_fps=%d, camera_url=%s",
+        HEADLESS, DISPLAY_W, DISPLAY_H, TARGET_FPS, CAMERA_URL or "none",
     )
 
     yield
@@ -189,19 +222,22 @@ app = FastAPI(
 # Endpoints
 # ─────────────────────────────────────────────────────────────────────────────
 
-@app.post("/frame", summary="Update camera frame")
+@app.post("/frame", summary="Update camera frame and/or detections")
 async def update_frame(body: FrameUpdate) -> JSONResponse:
-    try:
-        image_bytes = base64.b64decode(body.image_b64)
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Invalid base64 image data",
+    if body.image_b64:
+        try:
+            image_bytes = base64.b64decode(body.image_b64)
+        except Exception:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Invalid base64 image data",
+            )
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None, _state.update_frame, image_bytes, body.detections
         )
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(
-        None, _state.update_frame, image_bytes, body.detections
-    )
+    else:
+        _state.update_detections(body.detections)
     return JSONResponse({"status": "ok", "detections": len(body.detections)})
 
 

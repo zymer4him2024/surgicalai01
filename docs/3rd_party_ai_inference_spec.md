@@ -1,6 +1,6 @@
 # 3rd Party AI Inference Integration Specification
 
-**Version**: 1.0  
+**Version**: 1.2 (CSV Mapping & Multitenant)  
 **Issued by**: Antigravity Surgical AI  
 **Audience**: AI Model Suppliers / Computer Vision Teams  
 
@@ -8,60 +8,89 @@
 
 ## Overview
 
-This document specifies the HTTP API contract required for integrating a 3rd party object detection model into the Antigravity Surgical AI system. The model must be deployed as an edge service (typically on the Raspberry Pi 5) reachable via the internal network.
+This document specifies the HTTP API contract for integrating a 3rd party object detection model into the Antigravity system. The model is integrated as an **edge service** reachable by the Gateway Agent.
 
-The **Gateway Agent** acts as a client, sending images to your service and expecting standardized detection results in return.
+### Key Architectural Concepts (v1.2)
+
+1. **Gateway Orchestration**: The **Gateway Agent** is the central orchestrator. It manages the connection to your model using configuration fetched from the Digioptics Cloud.
+2. **Decoupled Mapping (CSV Flow)**: 
+   - **Vendor Responsibility**: Output stable, internal "Model Labels" (e.g., `inst_104`). Focus on detection stability.
+   - **Customer Responsibility**: Provide a **CSV file** mapping your `inst_104` to their internal SKU (e.g., `Mayo_SC_05`).
+   - **Gateway Responsibility**: Perform the lookup and translate raw IDs into the final display names for the HUD.
+3. **Size-Based Differentiation (`inst-104` vs `inst-105`)**
+If two instruments have the same shape but different sizes:
+- **Model Responsibility**: The AI model should ideally differentiate them into unique raw labels (e.g., `inst_104_small` vs `inst_105_large`) based on pixel area or aspect ratio.
+- **Reference Scale**: Since our camera has a **fixed focal length and mounting distance**, pixel dimensions (`width` x `height` in the bounding box) are a direct proxy for physical size. 
+- **Gateway Filter**: Our Gateway Agent can apply an optional **Dimension Filter** (stored in the cloud config) to validate that `inst_104` detections fall within an expected pixel-size range.
+4. **Identity Tracking**: Every request includes headers (`X-App-ID`, `X-Device-ID`) for domain and station isolation.
 
 ---
 
 ## Integration Architecture
 
 ```mermaid
-graph LR
-    Camera[Camera Agent] -->|Image Bytes| Gateway[Gateway Agent]
-    Gateway -->|POST /predict| ExternalAI[3rd Party AI Service]
-    ExternalAI -->|JSON Detections| Gateway
-    Gateway -->|Normalized Results| Display[Display/Storage]
+graph TB
+    subgraph CLOUD["☁️ Application DB (Firebase)"]
+        CSV["CSV Mapping File<br/>(Vendor ID → SKU)"]
+        CONF["Model Endpoint Config"]
+    end
+
+    subgraph EDGE["📦 Edge Device (RPi5)"]
+        GW["Gateway Agent<br/>(Orchestrator)"]
+        CAM["Camera Agent"]
+    end
+
+    subgraph EXTERNAL["🤖 3rd Party Service"]
+        AI["AI Inference Model<br/>(Raw Label Output)"]
+    end
+
+    %% Config Path
+    CSV -.->|"Sync mapping"| GW
+    CONF -.->|"Sync endpoint"| GW
+
+    %% Inference Path (Direct)
+    CAM -->|"Frame"| GW
+    GW -->|"POST /predict<br/>(Raw ID Req)"| AI
+    AI -->|"Raw Detections"| GW
+    GW -->|"CSV Lookup & Display"| GW
 ```
 
 ---
 
 ## API Specification
 
-### 1. Inference Endpoint: `POST /predict` (or `/inference`)
+### 1. Inference Endpoint: `POST /predict`
 
-The model supplier must provide a RESTful endpoint that accepts an image and returns a list of detected surgical instruments.
+Your service must expose a RESTful endpoint. The exact path is configurable in our Cloud Dashboard.
 
-#### Request
+#### Request Headers
 
-| Parameter | Location | Type | Required | Description |
-|---|---|---|---|---|
-| `image` | Body (form-data) | File (Binary) | ✅ | Image in JPEG or PNG format |
+| Header | Required | Description |
+|---|---|---|
+| `Authorization` | ✅ | Bearer token or API key provided in our Cloud Dashboard. |
+| `X-App-ID` | ✅ | Domain ID: `surgical` \| `od` \| `inventory`. |
+| `X-Device-ID` | ✅ | Unique station ID (e.g., `rpi-001`). |
+| `Content-Type` | ✅ | `multipart/form-data` |
 
-**Headers**:
-- `Content-Type: multipart/form-data`
+#### Request Body (form-data)
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `image` | File (Binary) | ✅ | Image in JPEG format. |
 
 #### Response (200 OK)
-
-The response MUST follow this structure (or a compatible one that can be mapped via our adapter):
 
 ```json
 {
   "success": true,
-  "processing_time_ms": 45.2,
+  "inference_ms": 42.0,
   "items": [
     {
-      "label": "forceps",
-      "score": 0.985,
-      "box": [102, 240, 50, 180]
-    },
-    {
-      "label": "scalpel",
-      "score": 0.952,
-      "box": [300, 150, 40, 150]
+      "label": "inst_104",
+      "score": 0.98,
+      "box": [100, 200, 50, 150]
     }
-  ],
-  "device_temp_c": 68.5
+  ]
 }
 ```
 
@@ -69,37 +98,29 @@ The response MUST follow this structure (or a compatible one that can be mapped 
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `success` | boolean | ✅ | Whether inference was successful |
-| `processing_time_ms` | float | ✅ | Time taken for model inference only |
-| `items` | array | ✅ | List of detected objects |
-| `items[].label` | string | ✅ | Class name (e.g., "forceps") |
-| `items[].score` | float | ✅ | Confidence score (0.0 to 1.0) |
-| `items[].box` | array[int] | ✅ | Bounding box: `[x_min, y_min, width, height]` |
-| `device_temp_c` | float | ❌ | Current AI accelerator temperature |
+| `success` | boolean | ✅ | Set to `false` on internal model errors. |
+| `inference_ms` | float | ✅ | Latency of the model inference only. |
+| `items` | array | ✅ | List of detected objects. |
+| `items[].label`| string | ✅ | **Raw Model Label** (matched to the CSV mapping). |
+| `items[].score`| float | ✅ | Confidence score (0.0 to 1.0). |
+| `items[].box`  | array[int] | ✅ | Bounding box: `[x_min, y_min, width, height]`. |
+
+## 4. Scale Calibration
+Because the Edge Device uses a fixed-distance camera mount, you can assume a constant **Pixels-per-Millimeter (PPM)** ratio once calibrated. We will provide the height (mm) of our standard workspace to your team to help differentiate `inst-104` from `inst-105` based on absolute physical size.
 
 ---
 
-## Performance Requirements
+## Performance SLA
 
-To ensure real-time performance on the HDMI HUD, the 3rd party service must meet the following SLAs:
-
-| Metric | Requirement | Target |
+| Metric | Requirement | Notes |
 |---|---|---|
-| **Latency (Inference)** | < 100ms | 50ms |
-| **Throughput** | > 10 FPS | 15 FPS |
-| **Stability** | 99.9% | No memory leaks over 24h operation |
+| **P95 Latency** | < 120ms | Includes networking between Gateway and AI container. |
+| **Throughput** | 10 FPS | Recommended minimum for smooth HUD overlay. |
 
 ---
 
 ## Implementation Checklist
 
-- [ ] Wrap model in a lightweight FastAPI/Flask container.
-- [ ] Expose `POST` endpoint as specified above.
-- [ ] Ensure model labels match the agreed-upon [Class Mapping Schema](device_master_catalog_spec.md).
-- [ ] Configure `docker-compose` to run the service on the `antigravity_bridge` network.
-
----
-
-## Contact
-
-For technical integration support: Antigravity Surgical AI Dev Team.
+- [ ] **Dockerized**: Service must run as a Docker container on the `antigravity_bridge`.
+- [ ] **Stability**: Raw labels must remain consistent across model updates to avoid breaking CSV mappings.
+- [ ] **Health Check**: Provide a `GET /health` endpoint.

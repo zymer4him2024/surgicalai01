@@ -1,0 +1,8 @@
+{
+  "job_id": "TEST-SURGEONET-014",
+  "target": {
+    "Overholt Clamp": 3,
+    "Lig. Clamp": 2,
+    "Atr. Forceps": 2
+  }
+}

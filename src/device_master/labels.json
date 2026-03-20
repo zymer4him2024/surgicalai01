@@ -1,78 +1,201 @@
 {
   "forceps": {
-    "fda_search_terms": ["forceps, tissue", "forceps, dressing", "forceps, sponge"],
+    "fda_search_terms": [
+      "forceps, tissue",
+      "forceps, dressing",
+      "forceps, sponge"
+    ],
     "preferred_specialty": "General, Plastic Surgery",
-    "fallback_name": "Surgical Forceps",
+    "fallback_name": "Sur. Forceps",
     "fallback_product_code": null,
     "fallback_class": "I"
   },
   "scissors": {
-    "fda_search_terms": ["scissors, tissue", "scissors, operating", "scissors, dissecting"],
+    "fda_search_terms": [
+      "scissors, tissue",
+      "scissors, operating",
+      "scissors, dissecting"
+    ],
     "preferred_specialty": "General, Plastic Surgery",
-    "fallback_name": "Surgical Scissors",
+    "fallback_name": "Sur. Scissor",
     "fallback_product_code": null,
     "fallback_class": "I"
   },
   "needle_holder": {
-    "fda_search_terms": ["holder, needle", "forceps, needle holder", "needle holder"],
+    "fda_search_terms": [
+      "holder, needle",
+      "forceps, needle holder",
+      "needle holder"
+    ],
     "fallback_name": "Needle Holder",
     "fallback_product_code": null,
     "fallback_class": "I"
   },
   "clamp": {
-    "fda_search_terms": ["clamp, vascular", "forceps, hemostatic", "clamp, surgical"],
-    "fallback_name": "Surgical Clamp/Hemostat",
+    "fda_search_terms": [
+      "clamp, vascular",
+      "forceps, hemostatic",
+      "clamp, surgical"
+    ],
+    "fallback_name": "Lig. Clamp",
     "fallback_product_code": null,
     "fallback_class": "I"
   },
   "scalpel": {
-    "fda_search_terms": ["knife, surgical", "scalpel"],
+    "fda_search_terms": [
+      "knife, surgical",
+      "scalpel"
+    ],
     "preferred_specialty": "General, Plastic Surgery",
-    "fallback_name": "Surgical Scalpel/Knife",
+    "fallback_name": "Scalpel",
     "fallback_product_code": null,
     "fallback_class": "II"
   },
   "retractor": {
-    "fda_search_terms": ["retractor, self-retaining", "retractor, surgical", "retractor, hand"],
-    "fallback_name": "Surgical Retractor",
+    "fda_search_terms": [
+      "retractor, self-retaining",
+      "retractor, surgical",
+      "retractor, hand"
+    ],
+    "fallback_name": "Retractor",
     "fallback_product_code": null,
     "fallback_class": "I"
   },
   "suction": {
-    "fda_search_terms": ["aspirator, surgical", "tube, suction, surgical", "suction, surgical"],
+    "fda_search_terms": [
+      "aspirator, surgical",
+      "tube, suction, surgical",
+      "suction, surgical"
+    ],
     "preferred_specialty": "General, Plastic Surgery",
     "fallback_name": "Surgical Suction Tube",
     "fallback_product_code": null,
     "fallback_class": "II"
   },
   "bovie": {
-    "fda_search_terms": ["electrosurgical, cutting & coagulation", "cautery, surgical", "electrosurgical unit"],
+    "fda_search_terms": [
+      "electrosurgical, cutting & coagulation",
+      "cautery, surgical",
+      "electrosurgical unit"
+    ],
     "preferred_specialty": "General, Plastic Surgery",
     "fallback_name": "Electrosurgical Cautery (Bovie)",
     "fallback_product_code": null,
     "fallback_class": "II"
   },
   "sponge": {
-    "fda_search_terms": ["sponge, surgical", "sponge, laparotomy", "sponge, gauze"],
+    "fda_search_terms": [
+      "sponge, surgical",
+      "sponge, laparotomy",
+      "sponge, gauze"
+    ],
     "preferred_specialty": "General, Plastic Surgery",
     "fallback_name": "Surgical Sponge",
     "fallback_product_code": null,
     "fallback_class": "II"
   },
   "gauze": {
-    "fda_search_terms": ["dressing, gauze", "gauze, surgical", "sponge, gauze"],
+    "fda_search_terms": [
+      "dressing, gauze",
+      "gauze, surgical",
+      "sponge, gauze"
+    ],
     "preferred_specialty": "General, Plastic Surgery",
     "fallback_name": "Surgical Gauze",
     "fallback_product_code": null,
     "fallback_class": "II"
   },
   "towel_clip": {
-    "fda_search_terms": ["clip, towel", "towel clip", "forceps, towel"],
+    "fda_search_terms": [
+      "clip, towel",
+      "towel clip",
+      "forceps, towel"
+    ],
     "fallback_name": "Towel Clip",
     "fallback_product_code": null,
     "fallback_class": "I"
   },
   "other_instrument": {
+    "fda_search_terms": [
+      "instrument, surgical"
+    ],
+    "fallback_name": "Surgical Instrument",
+    "fallback_product_code": null,
+    "fallback_class": null
+  },
+  "Overholt Clamp": {
+    "fda_search_terms": ["forceps, hemostatic", "clamp, surgical"],
+    "fallback_name": "Overholt Clamp",
+    "fallback_product_code": null,
+    "fallback_class": "I"
+  },
+  "Metz. Scissor": {
+    "fda_search_terms": ["scissors, dissecting", "scissors, tissue"],
+    "fallback_name": "Metzenbaum Scissor",
+    "fallback_product_code": null,
+    "fallback_class": "I"
+  },
+  "Sur. Scissor": {
+    "fda_search_terms": ["scissors, operating", "scissors, tissue"],
+    "fallback_name": "Surgical Scissor",
+    "fallback_product_code": null,
+    "fallback_class": "I"
+  },
+  "Needle Holder": {
+    "fda_search_terms": ["holder, needle", "forceps, needle holder"],
+    "fallback_name": "Needle Holder",
+    "fallback_product_code": null,
+    "fallback_class": "I"
+  },
+  "Sur. Forceps": {
+    "fda_search_terms": ["forceps, tissue", "forceps, dressing"],
+    "fallback_name": "Surgical Forceps",
+    "fallback_product_code": null,
+    "fallback_class": "I"
+  },
+  "Atr. Forceps": {
+    "fda_search_terms": ["forceps, tissue", "forceps, atraumatic"],
+    "fallback_name": "Atraumatic Forceps",
+    "fallback_product_code": null,
+    "fallback_class": "I"
+  },
+  "Scalpel": {
+    "fda_search_terms": ["knife, surgical", "scalpel"],
+    "fallback_name": "Scalpel",
+    "fallback_product_code": null,
+    "fallback_class": "II"
+  },
+  "Retractor": {
+    "fda_search_terms": ["retractor, surgical", "retractor, self-retaining"],
+    "fallback_name": "Retractor",
+    "fallback_product_code": null,
+    "fallback_class": "I"
+  },
+  "Lig. Clamp": {
+    "fda_search_terms": ["clamp, vascular", "forceps, hemostatic"],
+    "fallback_name": "Ligature Clamp",
+    "fallback_product_code": null,
+    "fallback_class": "I"
+  },
+  "Peri. Clamp": {
+    "fda_search_terms": ["clamp, surgical", "forceps, hemostatic"],
+    "fallback_name": "Perioneal Clamp",
+    "fallback_product_code": null,
+    "fallback_class": "I"
+  },
+  "Hook": {
+    "fda_search_terms": ["instrument, surgical"],
+    "fallback_name": "Surgical Instrument",
+    "fallback_product_code": null,
+    "fallback_class": "I"
+  },
+  "Bowl": {
+    "fda_search_terms": ["instrument, surgical"],
+    "fallback_name": "Surgical Instrument",
+    "fallback_product_code": null,
+    "fallback_class": null
+  },
+  "Tong": {
     "fda_search_terms": ["instrument, surgical"],
     "fallback_name": "Surgical Instrument",
     "fallback_product_code": null,

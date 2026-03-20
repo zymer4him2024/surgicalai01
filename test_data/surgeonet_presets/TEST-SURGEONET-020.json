@@ -1,0 +1,9 @@
+{
+  "job_id": "TEST-SURGEONET-020",
+  "target": {
+    "Metz. Scissor": 4,
+    "Peri. Clamp": 3,
+    "Overholt Clamp": 2,
+    "Retractor": 2
+  }
+}

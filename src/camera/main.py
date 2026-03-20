@@ -62,6 +62,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     global _cap, _capture_thread
     _cap = cv2.VideoCapture(CAMERA_INDEX, cv2.CAP_V4L2)
     if _cap.isOpened():
+        _cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'))
         _cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_WIDTH)
         _cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
         _cap.set(cv2.CAP_PROP_FPS, CAMERA_FPS)

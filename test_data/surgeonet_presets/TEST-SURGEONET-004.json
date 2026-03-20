@@ -1,0 +1,11 @@
+{
+  "job_id": "TEST-SURGEONET-004",
+  "target": {
+    "Peri. Clamp": 4,
+    "Tong": 2,
+    "Retractor": 1,
+    "Sur. Scissor": 2,
+    "Hook": 1,
+    "Overholt Clamp": 3
+  }
+}

@@ -40,6 +40,10 @@ FIREBASE_STORAGE_BUCKET = os.getenv(
 )
 FIRESTORE_COLLECTION = os.getenv("FIRESTORE_COLLECTION", "sync_events")
 
+# Identity — stamped on every Firestore document
+_APP_ID = os.getenv("APP_ID", "unknown")
+_DEVICE_ID = os.getenv("DEVICE_ID", "unknown")
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Uploader factory
@@ -157,6 +161,8 @@ class FirebaseUploader(BaseUploader):
         doc_ref = self._db.collection(FIRESTORE_COLLECTION).document()
         doc_ref.set({
             **payload,
+            "app_id": _APP_ID,
+            "device_id": _DEVICE_ID,
             "snapshot_urls": storage_urls,
             "timestamp": SERVER_TIMESTAMP,
         })

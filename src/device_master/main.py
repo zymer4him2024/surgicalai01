@@ -36,6 +36,8 @@ logging.basicConfig(
 logger = logging.getLogger("device_master.main")
 
 MODULE_NAME = os.getenv("MODULE_NAME", "DeviceMasterAgent")
+APP_ID = os.getenv("APP_ID", "unknown")
+DEVICE_ID = os.getenv("DEVICE_ID", "unknown")
 
 
 @asynccontextmanager
@@ -68,6 +70,8 @@ async def health_check() -> HealthResponse:
     return HealthResponse(
         status="healthy" if cache.is_loaded() else "degraded",
         module=MODULE_NAME,
+        app_id=APP_ID,
+        device_id=DEVICE_ID,
         cache=CacheStatus(
             loaded=cache.is_loaded(),
             label_count=len(cache.all_entries()),

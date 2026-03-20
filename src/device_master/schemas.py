@@ -30,4 +30,6 @@ class CacheStatus(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     module: str
+    app_id: str = "unknown"
+    device_id: str = "unknown"
     cache: CacheStatus
