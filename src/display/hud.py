@@ -22,8 +22,13 @@ Layout (1920x1080):
 
 from __future__ import annotations
 
+import os
+
 import cv2
 import numpy as np
+
+# Coordinate space of incoming bbox values — must match runner.py INPUT_SIZE
+_BBOX_COORD_SIZE = int(os.getenv("INPUT_SIZE", "416"))
 
 from src.display.buffer import _StateSnapshot, get_border_bgr
 from src.display.schemas import BorderColor, Detection
@@ -129,7 +134,7 @@ class HUDRenderer:
     def _draw_detections(canvas: np.ndarray, detections: list[Detection]) -> None:
         h, w = canvas.shape[:2]
         for det in detections:
-            x1, y1, x2, y2 = (int(v * s / 640) for v, s in
+            x1, y1, x2, y2 = (int(v * s / _BBOX_COORD_SIZE) for v, s in
                                zip(det.bbox, [w, h, w, h]))
             cv2.rectangle(canvas, (x1, y1), (x2, y2), C_BBOX, 2, cv2.LINE_AA)
 

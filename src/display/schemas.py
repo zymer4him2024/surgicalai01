@@ -19,8 +19,8 @@ class BorderColor(str, Enum):
 class Detection(BaseModel):
     class_name: str
     confidence: float = Field(ge=0.0, le=1.0)
-    bbox: list[float] = Field(min_length=4, max_length=4)  # [x1,y1,x2,y2] in 640x640 space
-    keypoints: Optional[list[list[float]]] = Field(None, description="[x, y] in 640x640 space")
+    bbox: list[float] = Field(min_length=4, max_length=4)  # [x1,y1,x2,y2] in INPUT_SIZE pixel space (default 416x416)
+    keypoints: Optional[list[list[float]]] = Field(None, description="[x, y] in INPUT_SIZE pixel space")
 
 
 class AIStatus(BaseModel):
