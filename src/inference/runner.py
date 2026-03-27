@@ -229,9 +229,19 @@ def _try_load_hailo(hef_path: str, log: logging.Logger) -> bool:
         for info in hef.get_input_vstream_infos():
             log.info("HEF INPUT vstream: name=%s shape=%s format=%s",
                      info.name, info.shape, info.format)
+            try:
+                log.info("HEF INPUT quant: type=%s order=%s",
+                         info.format.type, info.format.order)
+            except AttributeError:
+                pass
         for info in hef.get_output_vstream_infos():
             log.info("HEF OUTPUT vstream: name=%s shape=%s format=%s",
                      info.name, info.shape, info.format)
+            try:
+                log.info("HEF OUTPUT quant: type=%s order=%s",
+                         info.format.type, info.format.order)
+            except AttributeError:
+                pass
         return True
     except Exception as exc:
         log.warning("Hailo SDK unavailable (%s) — simulation mode", exc)
@@ -288,6 +298,10 @@ def _decode_yolov8_decoupled(
     cls_max = float(cls_tensor.max())
     cls_min = float(cls_tensor.min())
     log.info("DIAG cls_tensor raw range: min=%.4f max=%.4f shape=%s", cls_min, cls_max, cls_tensor.shape)
+    # Log per-class max scores to detect quantization bias
+    per_class_max = cls_tensor.max(axis=0)
+    log.info("DIAG per-class max scores: %s",
+             {DEFAULT_CLASS_NAMES[i]: round(float(per_class_max[i]), 4) for i in range(num_classes)})
     if cls_max > 1.0 or cls_min < 0.0:
         log.info("DIAG applying sigmoid to cls_tensor")
         cls_tensor = 1.0 / (1.0 + np.exp(-np.clip(cls_tensor, -50, 50)))
