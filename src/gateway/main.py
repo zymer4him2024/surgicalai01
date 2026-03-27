@@ -657,17 +657,17 @@ async def _counting_loop() -> None:
                 }
                 if current_job and current_job.get("scan_info"):
                     hud_payload["scan_info"] = current_job["scan_info"]
-                await client().post(
+                asyncio.create_task(client().post(
                     f"{DISPLAY_URL}/hud",
                     json=hud_payload,
                     timeout=HEALTH_TIMEOUT,
-                )
+                ))
         except Exception as e:
             logger.error("Counting loop error: %s", e)
             await asyncio.sleep(1.0); continue
 
         elapsed = time.monotonic() - start_time
-        await asyncio.sleep(max(0.05, target_interval - elapsed))
+        await asyncio.sleep(max(0.005, target_interval - elapsed))
 
 
 async def _enrich_with_device_info(
