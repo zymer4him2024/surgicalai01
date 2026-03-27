@@ -268,6 +268,12 @@ def _decode_yolov8_decoupled(
     num_classes = cls_tensor.shape[-1]
     n_anchors = cls_tensor.shape[0]
 
+    # Apply sigmoid if values are outside [0, 1] (raw logits from HEF)
+    cls_max = float(cls_tensor.max())
+    cls_min = float(cls_tensor.min())
+    if cls_max > 1.0 or cls_min < 0.0:
+        cls_tensor = 1.0 / (1.0 + np.exp(-np.clip(cls_tensor, -50, 50)))
+
     # Find the DFL tensor (64 = 4 * 16) and raw regression tensor
     dfl_tensor = None
     reg_tensor = None
