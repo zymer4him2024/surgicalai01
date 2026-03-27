@@ -71,17 +71,20 @@ HEARTBEAT_SEC = float(os.getenv("HEARTBEAT_SEC", "30"))
 VERSION = os.getenv("VERSION", "1.0.0")
 
 # ── Device Identity ────────────────────────────────────────────────────────────
-_VALID_APP_IDS = {"surgical", "od", "inventory"}
+_VALID_APP_IDS = {"surgical", "od", "inventory", "inventory_count", "unassigned"}
 _DEVICE_ID_PATTERN = re.compile(r'^[a-zA-Z0-9\-]{1,64}$')
 
 APP_ID: str = os.getenv("APP_ID", "").strip()
 DEVICE_ID: str = os.getenv("DEVICE_ID", "").strip()
+PROJECT_ID: str = os.getenv("PROJECT_ID", "").strip()
 
 
 def _validate_identity() -> bool:
     """Validate APP_ID and DEVICE_ID. Returns True if both are valid."""
     ok = True
-    if APP_ID not in _VALID_APP_IDS:
+    if APP_ID == "unassigned":
+        logger.info("Bootstrap mode — device not yet assigned to a project (app_id=unassigned)")
+    elif APP_ID not in _VALID_APP_IDS:
         logger.critical(
             "APP_ID=%r is missing or invalid. Valid values: %s. "
             "Firestore writes are DISABLED — running in simulation mode.",
@@ -145,7 +148,7 @@ def _control_loop() -> None:
 
 async def _process_device_control() -> None:
     """Poll Firestore device_control/{DEVICE_ID} and relay commands to Gateway. Skipped in simulation mode."""
-    global _last_control_ts
+    global _last_control_ts, PROJECT_ID
     if _uploader.simulation_mode:
         return
     db = getattr(_uploader, "_db", None)
@@ -167,6 +170,71 @@ async def _process_device_control() -> None:
         if ts_seconds <= _last_control_ts:
             return
         _last_control_ts = ts_seconds
+
+        # Project reassignment reset — clear gateway state and update system_status
+        if data.get("reset") is True:
+            new_project_id = data.get("project_id", "")
+            new_app_id = data.get("app_id", "")
+            new_compose_file = data.get("compose_file", "")
+            new_hef_model = data.get("hef_model", "")
+
+            # Propagate project_id so subsequent Firestore docs are stamped correctly
+            PROJECT_ID = new_project_id
+            from src.firebase_sync.uploader import set_project_id
+            set_project_id(new_project_id)
+
+            logger.info(
+                "Project reassignment reset — project_id=%r app_id=%r compose=%r model=%r",
+                new_project_id, new_app_id, new_compose_file, new_hef_model,
+            )
+
+            # In bootstrap mode (APP_ID=unassigned) write assignment file for launcher.sh;
+            # skip gateway POST since no gateway is running in the bootstrap stack.
+            if APP_ID == "unassigned" and new_app_id and new_compose_file:
+                import json as _json
+                assignment_path = os.path.join(
+                    os.path.dirname(DB_PATH), "project_assignment.json"
+                )
+                assignment = {
+                    "app_id": new_app_id,
+                    "hef_model": new_hef_model,
+                    "compose_file": new_compose_file,
+                    "project_id": new_project_id,
+                }
+                try:
+                    with open(assignment_path, "w") as _f:
+                        _json.dump(assignment, _f)
+                    logger.info("Project assignment written → %s", assignment_path)
+                except OSError as exc:
+                    logger.warning("Failed to write project_assignment.json: %s", exc)
+            else:
+                # Normal mode — gateway is running; send reset signal
+                try:
+                    async with httpx.AsyncClient(timeout=3.0) as http:
+                        await http.post(
+                            f"{GATEWAY_URL}/job",
+                            json={"job_id": "PROJECT-RESET", "target": {}},
+                        )
+                        logger.info("Gateway reset: POST /job with empty target sent")
+                except Exception as exc:
+                    logger.warning("Gateway reset failed: %s", exc)
+
+            if new_project_id:
+                _db = getattr(_uploader, "_db", None)
+                if _db:
+                    try:
+                        from google.cloud.firestore_v1 import SERVER_TIMESTAMP  # type: ignore[import]
+                        _loop = asyncio.get_event_loop()
+                        await _loop.run_in_executor(
+                            None,
+                            lambda: _db.collection("system_status").document(DEVICE_ID).set(
+                                {"project_id": new_project_id, "updated_at": SERVER_TIMESTAMP},
+                                merge=True,
+                            ),
+                        )
+                    except Exception as exc:
+                        logger.debug("project_id status update failed: %s", exc)
+            return
 
         if "command" in data and "inference_running" not in data:
             payload = {"inference_running": data["command"] == "start"}
@@ -347,7 +415,7 @@ async def _register_device() -> None:
             payload: dict = {
                 "app_id": APP_ID,
                 "device_id": DEVICE_ID,
-                "status": "online",
+                "status": "pending" if APP_ID == "unassigned" else "online",
                 "last_seen": SERVER_TIMESTAMP,
                 "version": VERSION,
                 "simulation_mode": _uploader.simulation_mode,
@@ -604,12 +672,14 @@ async def _write_inspection_round(round_data: dict) -> None:
                 **round_data,
                 "app_id": APP_ID,
                 "device_id": DEVICE_ID,
+                "project_id": PROJECT_ID,
                 "slot_index": cursor,
                 "logged_at": dt.datetime.utcnow().isoformat() + "Z",
             }
             doc_ref.set({
                 "app_id": APP_ID,
                 "device_id": DEVICE_ID,
+                "project_id": PROJECT_ID,
                 "slots": slots,
                 "cursor": (cursor + 1) % 5,
                 "updated_at": SERVER_TIMESTAMP,

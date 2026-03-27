@@ -8,7 +8,7 @@
 
 ## Overview
 
-This document describes how customers can supply the list of instrument classes and their corresponding metadata for mapping YOLO detection results to standardized product names (e.g., FDA Classification).
+This document describes how customers can supply the list of instrument classes and their corresponding metadata for mapping AI detection results to standardized product names (e.g., FDA Classification).
 
 The system uses the **Device Master Agent** to translate raw model labels (like `forceps`) into human-readable, hospital-standardized names.
 
@@ -25,7 +25,7 @@ Ideal for isolated deployments or fixed sets of instruments.
 2. Format:
 ```json
 {
-  "yolo_label_name": {
+  "detection_label_name": {
     "fallback_name": "Standardized Name",
     "fallback_product_code": "Internal-ID-123",
     "fallback_class": "I",
@@ -38,7 +38,7 @@ Ideal for isolated deployments or fixed sets of instruments.
 Ideal for multi-site deployments with frequently updated inventories.
 
 1. The system will sync with the `device_catalog` collection in Firestore.
-2. Each document ID corresponds to the `yolo_label`.
+2. Each document ID corresponds to the `detection_label`.
 3. Fields required:
     - `device_name`: string (e.g., "Tissue Forceps, Ring")
     - `fda_class`: string ("I", "II", "III")

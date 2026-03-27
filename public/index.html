@@ -88,6 +88,23 @@
         .animate-fade-in {
             animation: fadeIn 0.4s ease-out forwards;
         }
+
+        .nav-tab.active {
+            background: rgba(255,255,255,0.08);
+            color: white;
+            border-left-color: #0a84ff;
+        }
+
+        .status-badge {
+            padding: 2px 8px;
+            border-radius: 20px;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            display: inline-flex;
+            align-items: center;
+        }
     </style>
 </head>
 
@@ -102,6 +119,24 @@
             <button
                 class="login-btn w-full bg-white text-black font-medium py-3 px-4 rounded-xl shadow-lg hover:bg-gray-200 transition-colors">
                 Sign in with Google
+            </button>
+        </div>
+    </div>
+
+    <!-- Pending Approval Overlay -->
+    <div id="pending-overlay"
+        class="absolute inset-0 z-50 bg-black/80 backdrop-blur-md hidden flex flex-col items-center justify-center p-6">
+        <div class="glass-card text-center p-10 rounded-2xl max-w-sm w-full">
+            <div class="w-14 h-14 rounded-full bg-amber-500/15 flex items-center justify-center mx-auto mb-5">
+                <svg class="w-7 h-7 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+                </svg>
+            </div>
+            <h2 class="text-xl font-medium mb-2 tracking-wide text-white">Awaiting Approval</h2>
+            <p class="text-gray-400 text-sm mb-2">Your account (<span id="pending-email" class="text-gray-200 font-mono text-xs"></span>) is pending admin approval.</p>
+            <p class="text-gray-600 text-xs mb-8">You will have access once an administrator approves your account.</p>
+            <button class="logout-btn w-full bg-white/10 text-white font-medium py-2.5 px-4 rounded-xl hover:bg-white/20 transition-colors text-sm">
+                Sign Out
             </button>
         </div>
     </div>
@@ -151,14 +186,21 @@
                 class="absolute inset-y-0 left-0 w-[250px] transform -translate-x-full md:relative md:translate-x-0 transition-transform duration-300 z-40 glass-panel border-r border-white/10 flex flex-col p-5 overflow-y-auto">
                 <nav class="space-y-1 mb-10">
                     <p class="text-[10px] font-bold uppercase tracking-widest text-gray-500 mb-4 px-2">Navigation</p>
-                    <a href="#"
-                        class="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/10 text-white font-medium text-sm border border-white/5 shadow-sm">
-                        <svg class="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <a href="#" data-tab="dashboard"
+                        class="nav-tab active flex items-center gap-3 px-3 py-2.5 rounded-xl text-white font-medium text-sm border-l-2 border-[#0a84ff] transition-all">
+                        <svg class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z">
-                            </path>
+                                d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/>
                         </svg>
                         Dashboard
+                    </a>
+                    <a href="#" data-tab="projects"
+                        class="nav-tab flex items-center gap-3 px-3 py-2.5 rounded-xl text-gray-400 font-medium text-sm border-l-2 border-transparent hover:text-white hover:bg-white/5 transition-all">
+                        <svg class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/>
+                        </svg>
+                        Projects
                     </a>
                 </nav>
             </aside>
@@ -166,113 +208,236 @@
             <!-- Sidebar Overlay for Mobile -->
             <div id="sidebar-overlay" class="fixed inset-0 bg-black/60 z-30 hidden md:hidden backdrop-blur-sm"></div>
 
-            <!-- Scrollable Content Area (Main + Activity Panel stack on mobile) -->
-            <div class="flex-1 overflow-y-auto flex flex-col xl:flex-row custom-scrollbar">
+            <!-- Scrollable Content Area -->
+            <div class="flex-1 overflow-y-auto custom-scrollbar" id="tab-content">
 
-                <!-- Main Content Area -->
-                <main class="flex-1 p-6 md:p-8 space-y-8 min-w-0">
-                    <header class="mb-6">
-                        <h2 class="text-2xl font-medium tracking-wide text-white">Company Overview</h2>
-                        <p class="text-sm text-gray-400 mt-1">Review live metrics and hospital inventory compliance.</p>
+                <!-- Dashboard Panel -->
+                <div data-panel="dashboard" class="flex flex-col xl:flex-row">
+
+                    <!-- Main Content Area -->
+                    <main class="flex-1 p-6 md:p-8 space-y-8 min-w-0">
+                        <header class="mb-6">
+                            <h2 class="text-2xl font-medium tracking-wide text-white">Company Overview</h2>
+                            <p class="text-sm text-gray-400 mt-1">Review live metrics and hospital inventory compliance.</p>
+                        </header>
+
+                        <!-- Top Row: Metrics & Line Chart -->
+                        <section class="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-in" style="animation-delay: 0.1s;">
+                            <div class="glass-card rounded-2xl p-6 flex flex-col justify-center items-center text-center">
+                                <h3 class="text-[10px] font-bold uppercase tracking-widest text-gray-500 mb-2">Today's Success Rate</h3>
+                                <div id="metric-success" class="text-5xl font-bold text-[#34c759] mb-2 drop-shadow-[0_0_15px_rgba(52,199,89,0.3)]">0%</div>
+                                <div class="text-xs text-gray-400">Total Scans: <span id="metric-total" class="font-semibold text-white">0</span></div>
+                            </div>
+                            <div class="glass-card rounded-2xl p-6 lg:col-span-2 flex flex-col h-[220px]">
+                                <div class="flex items-center justify-between mb-2">
+                                    <h3 class="text-sm font-medium text-white">Throughput Trend</h3>
+                                    <div class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-widest bg-blue-500/10 text-blue-400 border border-blue-500/20">Hourly</div>
+                                </div>
+                                <div class="flex-1 relative w-full pt-2"><canvas id="throughputChart"></canvas></div>
+                            </div>
+                        </section>
+
+                        <!-- Bottom Section: Missing Items Widget -->
+                        <section class="animate-fade-in" style="animation-delay: 0.2s;">
+                            <div class="glass-card rounded-2xl p-6 flex flex-col h-[320px]">
+                                <div class="flex justify-between items-center mb-5 border-b border-white/10 pb-4">
+                                    <h3 class="font-medium text-white flex items-center gap-2">
+                                        <svg class="h-4 w-4 text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                                        </svg>
+                                        Top Missing Items <span class="text-xs font-normal text-gray-500 ml-1">(Today)</span>
+                                    </h3>
+                                </div>
+                                <div class="overflow-y-auto flex-1 pr-2 custom-scrollbar space-y-3" id="missing-widget">
+                                    <p class="text-gray-500 text-sm text-center mt-10">No errors recorded today.</p>
+                                </div>
+                            </div>
+                        </section>
+                    </main>
+
+                    <!-- Right Activity Panel -->
+                    <aside class="w-full xl:w-[340px] shrink-0 xl:border-l border-white/10 flex flex-col bg-white/[0.01] xl:bg-transparent animate-fade-in" style="animation-delay: 0.3s;">
+                        <div class="p-6 flex-1 flex flex-col">
+                            <div class="flex justify-between items-center mb-6">
+                                <h2 class="text-xs font-bold uppercase tracking-widest text-gray-400">Recent Operations</h2>
+                                <div class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-blue-500/10 border border-blue-500/20">
+                                    <div class="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse"></div>
+                                    <span class="text-[10px] font-bold text-blue-400 uppercase tracking-wider">Live</span>
+                                </div>
+                            </div>
+                            <div class="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-4" id="timeline-feed">
+                                <p class="text-gray-500 text-sm text-center mt-10">Waiting for data...</p>
+                            </div>
+                        </div>
+                    </aside>
+
+                </div>
+
+                <!-- Projects Panel -->
+                <div data-panel="projects" style="display:none" class="p-6 md:p-8">
+                    <header class="mb-8">
+                        <h2 class="text-2xl font-medium tracking-wide text-white">Projects</h2>
+                        <p class="text-sm text-gray-400 mt-1">All active projects and their linked resources.</p>
                     </header>
 
-                    <!-- Top Row: Metrics & Line Chart -->
-                    <section class="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-in"
-                        style="animation-delay: 0.1s;">
-                        <!-- Success Rate Card -->
-                        <div class="glass-card rounded-2xl p-6 flex flex-col justify-center items-center text-center">
-                            <h3 class="text-[10px] font-bold uppercase tracking-widest text-gray-500 mb-2">Today's
-                                Success Rate</h3>
-                            <div id="metric-success"
-                                class="text-5xl font-bold text-[#34c759] mb-2 drop-shadow-[0_0_15px_rgba(52,199,89,0.3)]">
-                                0%
-                            </div>
-                            <div class="text-xs text-gray-400">Total Scans: <span id="metric-total"
-                                    class="font-semibold text-white">0</span></div>
+                    <!-- Project count summary -->
+                    <div id="projects-summary" class="mb-6 flex items-center gap-3">
+                        <span class="text-xs text-gray-500">Loading...</span>
+                    </div>
+
+                    <!-- Project cards grid -->
+                    <div id="company-projects-list" class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-5">
+                        <div class="glass-card rounded-2xl p-8 flex items-center justify-center col-span-full">
+                            <p class="text-gray-500 text-sm">Loading projects...</p>
                         </div>
+                    </div>
+                </div>
 
-                        <!-- Throughput Chart -->
-                        <div class="glass-card rounded-2xl p-6 lg:col-span-2 flex flex-col h-[220px]">
-                            <div class="flex items-center justify-between mb-2">
-                                <h3 class="text-sm font-medium text-white">Throughput Trend</h3>
-                                <div
-                                    class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-widest bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                                    Hourly</div>
-                            </div>
-                            <div class="flex-1 relative w-full pt-2">
-                                <canvas id="throughputChart"></canvas>
-                            </div>
+                <!-- Project Detail Panel (full page) -->
+                <div data-panel="project-detail" style="display:none" class="p-6 md:p-8 space-y-6">
+
+                    <!-- Back + header -->
+                    <div class="flex items-center gap-3 flex-wrap">
+                        <button id="back-to-projects" class="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white transition-colors shrink-0">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+                            Projects
+                        </button>
+                        <span class="text-gray-700">/</span>
+                        <div class="flex items-center gap-2 min-w-0">
+                            <span id="pd-status-dot" class="w-2 h-2 rounded-full bg-green-400 shrink-0"></span>
+                            <h2 id="pd-project-name" class="text-lg font-semibold text-white truncate"></h2>
+                            <span id="pd-app-badge" class="status-badge border text-[9px]"></span>
                         </div>
-                    </section>
+                    </div>
+                    <p id="pd-description" class="text-sm text-gray-400 -mt-2 pl-1 hidden"></p>
 
-                    <!-- Bottom Section: Missing Items Widget -->
-                    <section class="animate-fade-in" style="animation-delay: 0.2s;">
-                        <div class="glass-card rounded-2xl p-6 flex flex-col h-[320px]">
-                            <div class="flex justify-between items-center mb-5 border-b border-white/10 pb-4">
-                                <h3 class="font-medium text-white flex items-center gap-2">
-                                    <svg class="h-4 w-4 text-orange-400" fill="none" viewBox="0 0 24 24"
-                                        stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                            d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z">
-                                        </path>
-                                    </svg>
-                                    Top Missing Items <span
-                                        class="text-xs font-normal text-gray-500 ml-1">(Today)</span>
-                                </h3>
-                            </div>
-                            <div class="overflow-y-auto flex-1 pr-2 custom-scrollbar space-y-3" id="missing-widget">
-                                <p class="text-gray-500 text-sm text-center mt-10">No errors recorded today.</p>
-                            </div>
+                    <!-- Accuracy stats row -->
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                        <div class="glass-card rounded-2xl p-4 text-center">
+                            <p class="text-[9px] font-bold uppercase tracking-widest text-gray-500 mb-1.5">Total Ops</p>
+                            <p id="pd-stat-total" class="text-3xl font-bold text-white">—</p>
                         </div>
-                    </section>
-
-                </main>
-
-                <!-- Right Activity Panel (Live Status & Errors) -->
-                <!-- 320px on xl screens, stacks at bottom on mobile/tablet -->
-                <aside
-                    class="w-full xl:w-[340px] shrink-0 xl:border-l border-white/10 flex flex-col bg-white/[0.01] xl:bg-transparent animate-fade-in"
-                    style="animation-delay: 0.3s;">
-
-                    <div class="p-6 flex-1 flex flex-col h-full lg:h-[calc(100vh-64px)]">
-                        <div class="flex justify-between items-center mb-6">
-                            <h2 class="text-xs font-bold uppercase tracking-widest text-gray-400">Recent Operations</h2>
-                            <div
-                                class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-blue-500/10 border border-blue-500/20">
-                                <div class="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse"></div>
-                                <span class="text-[10px] font-bold text-blue-400 uppercase tracking-wider">Live</span>
-                            </div>
+                        <div class="glass-card rounded-2xl p-4 text-center">
+                            <p class="text-[9px] font-bold uppercase tracking-widest text-gray-500 mb-1.5">Success Rate</p>
+                            <p id="pd-stat-rate" class="text-3xl font-bold text-green-400">—</p>
                         </div>
-
-                        <!-- Timeline Feed -->
-                        <div class="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-4" id="timeline-feed">
-                            <p class="text-gray-500 text-sm text-center mt-10">Waiting for data...</p>
+                        <div class="glass-card rounded-2xl p-4 text-center">
+                            <p class="text-[9px] font-bold uppercase tracking-widest text-gray-500 mb-1.5">Mismatches</p>
+                            <p id="pd-stat-mismatches" class="text-3xl font-bold text-red-400">—</p>
+                        </div>
+                        <div class="glass-card rounded-2xl p-4 text-center">
+                            <p class="text-[9px] font-bold uppercase tracking-widest text-gray-500 mb-1.5">Today's Ops</p>
+                            <p id="pd-stat-today" class="text-3xl font-bold text-blue-400">—</p>
                         </div>
                     </div>
 
-                </aside>
+                    <!-- Main: info column + operations column -->
+                    <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+
+                        <!-- Left info cards -->
+                        <div class="space-y-4">
+                            <div class="glass-card rounded-2xl p-4">
+                                <div class="flex items-center gap-2 mb-3">
+                                    <span class="w-6 h-6 rounded-lg bg-[#0a84ff]/20 flex items-center justify-center shrink-0">
+                                        <svg class="w-3.5 h-3.5 text-[#0a84ff]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-2 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
+                                    </span>
+                                    <span class="text-[9px] font-bold uppercase tracking-widest text-gray-500">Customer</span>
+                                </div>
+                                <div id="pd-customer" class="space-y-1"></div>
+                            </div>
+                            <div class="glass-card rounded-2xl p-4">
+                                <div class="flex items-center gap-2 mb-3">
+                                    <span class="w-6 h-6 rounded-lg bg-purple-500/20 flex items-center justify-center shrink-0">
+                                        <svg class="w-3.5 h-3.5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18"/></svg>
+                                    </span>
+                                    <span class="text-[9px] font-bold uppercase tracking-widest text-gray-500">Devices</span>
+                                </div>
+                                <div id="pd-devices" class="space-y-1.5"></div>
+                            </div>
+                            <div class="glass-card rounded-2xl p-4">
+                                <div class="flex items-center gap-2 mb-3">
+                                    <span class="w-6 h-6 rounded-lg bg-orange-500/20 flex items-center justify-center shrink-0">
+                                        <svg class="w-3.5 h-3.5 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/></svg>
+                                    </span>
+                                    <span class="text-[9px] font-bold uppercase tracking-widest text-gray-500">Application</span>
+                                </div>
+                                <div id="pd-application" class="space-y-1"></div>
+                            </div>
+                            <div class="glass-card rounded-2xl p-4">
+                                <div class="flex items-center gap-2 mb-3">
+                                    <span class="w-6 h-6 rounded-lg bg-emerald-500/20 flex items-center justify-center shrink-0">
+                                        <svg class="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+                                    </span>
+                                    <span class="text-[9px] font-bold uppercase tracking-widest text-gray-500">Top Missing Items</span>
+                                </div>
+                                <div id="pd-missing" class="space-y-1.5"></div>
+                            </div>
+                        </div>
+
+                        <!-- Right: live operations list -->
+                        <div class="xl:col-span-2 glass-card rounded-2xl p-5 flex flex-col" style="min-height:500px">
+                            <div class="flex items-center justify-between mb-4 shrink-0">
+                                <h3 class="text-xs font-bold uppercase tracking-widest text-gray-400">Recent Operations</h3>
+                                <div class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-blue-500/10 border border-blue-500/20">
+                                    <div class="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse"></div>
+                                    <span class="text-[10px] font-bold text-blue-400 uppercase tracking-wider">Live</span>
+                                </div>
+                            </div>
+                            <div id="pd-operations" class="flex-1 overflow-y-auto custom-scrollbar space-y-3 pr-1">
+                                <p class="text-gray-500 text-sm text-center py-10">Loading...</p>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
 
             </div>
         </div>
     </div>
 
     <script>
-        // Simple mobile menu toggle logic
-        document.addEventListener('DOMContentLoaded', () => {
-            const btn = document.getElementById('mobile-menu-btn');
-            const sidebar = document.getElementById('sidebar');
-            const overlay = document.getElementById('sidebar-overlay');
+        (function () {
+            var sidebar = document.getElementById('sidebar');
+            var overlay = document.getElementById('sidebar-overlay');
+            var btn = document.getElementById('mobile-menu-btn');
 
             function toggleMenu() {
+                if (!sidebar || !overlay) return;
                 sidebar.classList.toggle('-translate-x-full');
                 overlay.classList.toggle('hidden');
             }
+            if (btn) btn.addEventListener('click', toggleMenu);
+            if (overlay) overlay.addEventListener('click', toggleMenu);
 
-            if (btn && sidebar && overlay) {
-                btn.addEventListener('click', toggleMenu);
-                overlay.addEventListener('click', toggleMenu);
+            // Tab switching
+            var tabs = document.querySelectorAll('.nav-tab');
+            var panels = document.querySelectorAll('[data-panel]');
+
+            function switchTab(tabId) {
+                tabs.forEach(function (t) {
+                    var isActive = t.dataset.tab === tabId;
+                    t.classList.toggle('active', isActive);
+                    t.style.color = isActive ? 'white' : '';
+                    t.style.borderLeftColor = isActive ? '#0a84ff' : 'transparent';
+                });
+                panels.forEach(function (p) {
+                    p.style.display = p.dataset.panel === tabId ? '' : 'none';
+                });
             }
-        });
+
+            tabs.forEach(function (tab) {
+                tab.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    switchTab(tab.dataset.tab);
+                    if (sidebar) {
+                        sidebar.classList.add('-translate-x-full');
+                        if (overlay) overlay.classList.add('hidden');
+                    }
+                });
+            });
+
+            switchTab('dashboard');
+        })();
     </script>
     <script type="module" src="app.js"></script>
 </body>

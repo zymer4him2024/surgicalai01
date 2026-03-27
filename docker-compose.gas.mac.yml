@@ -1,0 +1,159 @@
+# docker-compose.gas.mac.yml — Gas Cylinder Inventory (Mac simulation)
+#
+# Usage:
+#   docker compose -f docker-compose.gas.mac.yml up -d --build
+
+services:
+  gas_gateway_agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.gas_gateway
+    container_name: gas_gateway_agent
+    restart: unless-stopped
+    command: python -m src.gas_gateway.main
+    ports:
+      - "8010:8010"
+    networks:
+      gas_bridge:
+        ipv4_address: 172.21.0.10
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8010/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    environment:
+      - MODULE_NAME=GasGatewayAgent
+      - APP_ID=inventory_count
+      - DEVICE_ID=US-Gas-001
+      - PROJECT_ID=${PROJECT_ID:-}
+      - EXTERNAL_AI_TOKEN=${EXTERNAL_AI_TOKEN:-}
+      - INFERENCE_URL=http://gas_mock_ai:8006
+      - INFERENCE_ENDPOINT=/predict
+      - CAMERA_URL=http://gas_camera_agent:8002
+      - DISPLAY_URL=http://gas_display_agent:8013
+      - FIREBASE_SYNC_URL=http://gas_firebase_sync_agent:8004
+      - LOW_STOCK_THRESHOLD=5
+      - SYNC_INTERVAL_SEC=60
+      - LOCATION_NAME=Warehouse A (Sim)
+      - OPERATOR_ID=SimOperator
+      - CUSTOMER_DB_URL=
+      - GATEWAY_API_KEY=
+    volumes:
+      - ./src:/app/src:ro
+    mem_limit: "512m"
+    cpus: "1.0"
+
+  gas_camera_agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gas_camera_agent
+    restart: unless-stopped
+    command: python -m src.camera.main
+    expose:
+      - "8002"
+    networks:
+      gas_bridge:
+        ipv4_address: 172.21.0.12
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8002/health" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    environment:
+      - MODULE_NAME=GasCameraAgent
+      - CAMERA_INDEX=0
+    volumes:
+      - ./src:/app/src:ro
+    mem_limit: "256m"
+    cpus: "0.5"
+
+  gas_display_agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.gas_display
+    container_name: gas_display_agent
+    restart: unless-stopped
+    command: python -m src.gas_display.main
+    expose:
+      - "8013"
+    ports:
+      - "8013:8013"
+    networks:
+      gas_bridge:
+        ipv4_address: 172.21.0.13
+    environment:
+      - MODULE_NAME=GasDisplayAgent
+      - DISPLAY_HEADLESS=true
+      - DISPLAY_WIDTH=1920
+      - DISPLAY_HEIGHT=1080
+      - DISPLAY_FPS=15
+    volumes:
+      - ./src:/app/src:ro
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8013/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    mem_limit: "512m"
+    cpus: "1.0"
+
+  gas_firebase_sync_agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.firebase_sync
+    container_name: gas_firebase_sync_agent
+    restart: unless-stopped
+    command: python -m src.firebase_sync.main
+    expose:
+      - "8004"
+    networks:
+      gas_bridge:
+        ipv4_address: 172.21.0.14
+    environment:
+      - MODULE_NAME=GasFirebaseSyncAgent
+      - APP_ID=inventory_count
+      - DEVICE_ID=US-Gas-001
+      - PROJECT_ID=${PROJECT_ID:-}
+      - FIRESTORE_COLLECTION=inventory_count_events
+      - DISPLAY_URL=http://gas_display_agent:8013
+      - GATEWAY_URL=http://gas_gateway_agent:8010
+    volumes:
+      - ./data:/app/data:rw
+      - ./src:/app/src:ro
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8004/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    mem_limit: "256m"
+    cpus: "0.5"
+
+  gas_mock_ai:
+    build:
+      context: .
+      dockerfile: Dockerfile.mock_external_ai
+    container_name: gas_mock_ai
+    restart: unless-stopped
+    command: python -m src.mock_external_ai.main
+    expose:
+      - "8006"
+    networks:
+      gas_bridge:
+        ipv4_address: 172.21.0.16
+    environment:
+      - MODULE_NAME=GasMockAI
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8006/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    mem_limit: "256m"
+    cpus: "0.5"
+
+networks:
+  gas_bridge:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16

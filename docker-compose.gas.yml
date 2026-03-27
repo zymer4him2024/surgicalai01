@@ -1,0 +1,204 @@
+# docker-compose.gas.yml — Gas Cylinder Inventory (RPi5 + Hailo-8 target)
+#
+# Usage:
+#   cp .env.gas.example .env
+#   docker compose -f docker-compose.gas.yml up -d --build
+
+services:
+  gas_gateway_agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.gas_gateway
+    container_name: gas_gateway_agent
+    restart: unless-stopped
+    # Needs root for /sys/class/thermal reads
+    user: "0:0"
+    command: python -m src.gas_gateway.main
+    ports:
+      - "8010:8010"
+    networks:
+      gas_bridge:
+        ipv4_address: 172.21.0.10
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8010/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    env_file:
+      - .env
+    environment:
+      - MODULE_NAME=GasGatewayAgent
+      - APP_ID=${APP_ID:-inventory_count}
+      - DEVICE_ID=${DEVICE_ID}
+      - PROJECT_ID=${PROJECT_ID:-}
+      - EXTERNAL_AI_TOKEN=${EXTERNAL_AI_TOKEN:-}
+      - INFERENCE_URL=http://gas_inference_agent:8001
+      - INFERENCE_ENDPOINT=${INFERENCE_ENDPOINT:-/inference}
+      - CAMERA_URL=http://gas_camera_agent:8002
+      - DISPLAY_URL=http://gas_display_agent:8013
+      - FIREBASE_SYNC_URL=http://gas_firebase_sync_agent:8004
+      - LOW_STOCK_THRESHOLD=${LOW_STOCK_THRESHOLD:-5}
+      - SYNC_INTERVAL_SEC=${SYNC_INTERVAL_SEC:-60}
+      - LOCATION_NAME=${LOCATION_NAME:-}
+      - OPERATOR_ID=${OPERATOR_ID:-}
+      - CUSTOMER_DB_URL=${CUSTOMER_DB_URL:-}
+      - GATEWAY_API_KEY=${GATEWAY_API_KEY:-}
+    volumes:
+      - /sys/class/thermal:/sys/class/thermal:ro
+    mem_limit: "512m"
+    cpus: "1.0"
+    depends_on:
+      gas_camera_agent:
+        condition: service_healthy
+
+  gas_inference_agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.inference
+    container_name: gas_inference_agent
+    restart: unless-stopped
+    command: python -m src.inference.main
+    expose:
+      - "8001"
+    networks:
+      gas_bridge:
+        ipv4_address: 172.21.0.11
+    # SYS_ADMIN required by HailoRT SDK for PCIe DMA buffer management.
+    # Tested cap_drop: ALL with individual caps — only SYS_ADMIN is needed.
+    cap_add:
+      - SYS_ADMIN
+    cap_drop:
+      - ALL
+    devices:
+      - /dev/hailo0:/dev/hailo0
+    shm_size: "512mb"
+    mem_limit: "2g"
+    memswap_limit: "2g"
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8001/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    environment:
+      - MODULE_NAME=GasInferenceAgent
+      - HAILO_DEVICE=/dev/hailo0
+      - HEF_PATH=/app/models/${GAS_HEF_MODEL:-yolov8m.hef}
+      - TEMP_WARNING_CELSIUS=85.0
+      - TEMP_CRITICAL_CELSIUS=95.0
+      - INFERENCE_TIMEOUT_SEC=10
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./models:/app/models:ro
+      - /usr/lib/python3/dist-packages/hailo_platform:/app/hailo_platform:ro
+      - /usr/lib/libhailort.so.4.20.0:/usr/lib/libhailort.so.4.20.0:ro
+      - /usr/lib/libhailort.so:/usr/lib/libhailort.so:ro
+
+  gas_camera_agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gas_camera_agent
+    restart: unless-stopped
+    command: python -m src.camera.main
+    expose:
+      - "8002"
+    networks:
+      gas_bridge:
+        ipv4_address: 172.21.0.12
+    devices:
+      - /dev/video0:/dev/video0
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8002/frame", "-o", "/dev/null" ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    environment:
+      - MODULE_NAME=GasCameraAgent
+      - CAMERA_INDEX=0
+      - CAMERA_WIDTH=1920
+      - CAMERA_HEIGHT=1080
+      - CAMERA_FPS=30
+    mem_limit: "512m"
+    cpus: "1.0"
+
+  gas_display_agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.gas_display
+    container_name: gas_display_agent
+    restart: unless-stopped
+    # Needs root for X11 access
+    user: "0:0"
+    command: python -m src.gas_display.main
+    expose:
+      - "8013"
+    networks:
+      gas_bridge:
+        ipv4_address: 172.21.0.13
+    # ipc: host for X11 MIT-SHM shared memory
+    ipc: host
+    environment:
+      - MODULE_NAME=GasDisplayAgent
+      - DISPLAY=:0
+      - DISPLAY_WIDTH=1920
+      - DISPLAY_HEIGHT=1080
+      - DISPLAY_FPS=15
+      - DISPLAY_HEADLESS=false
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ${HOME}/.Xauthority:/root/.Xauthority:ro
+    devices:
+      - /dev/dri:/dev/dri
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8013/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    mem_limit: "512m"
+    cpus: "1.0"
+
+  gas_firebase_sync_agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.firebase_sync
+    container_name: gas_firebase_sync_agent
+    restart: unless-stopped
+    command: python -m src.firebase_sync.main
+    expose:
+      - "8004"
+    networks:
+      gas_bridge:
+        ipv4_address: 172.21.0.14
+    env_file:
+      - .env
+    environment:
+      - MODULE_NAME=GasFirebaseSyncAgent
+      - APP_ID=${APP_ID:-inventory_count}
+      - DEVICE_ID=${DEVICE_ID}
+      - PROJECT_ID=${PROJECT_ID:-}
+      - FIRESTORE_COLLECTION=${FIRESTORE_COLLECTION:-inventory_count_events}
+      - DISPLAY_URL=http://gas_display_agent:8013
+      - GATEWAY_URL=http://gas_gateway_agent:8010
+    volumes:
+      - ./data:/app/data:rw
+      - ./firebase-credentials.json:/app/firebase-credentials.json:ro
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8004/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    mem_limit: "512m"
+    cpus: "0.5"
+
+networks:
+  gas_bridge:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16

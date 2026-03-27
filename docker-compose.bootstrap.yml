@@ -1,0 +1,39 @@
+# docker-compose.bootstrap.yml — Universal Device Bootstrap
+#
+# Runs on a fresh/unassigned RPi. Only firebase_sync starts.
+# Device registers in Firestore as app_id=unassigned, status=pending.
+# When admin assigns a project, launcher.sh switches to the correct compose file.
+#
+# Usage:
+#   cp .env.bootstrap.example .env  (set DEVICE_ID)
+#   docker compose -f docker-compose.bootstrap.yml up -d --build
+
+services:
+  firebase_sync_agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.firebase_sync
+    container_name: firebase_sync_agent
+    restart: unless-stopped
+    command: python -m src.firebase_sync.main
+    ports:
+      - "8004:8004"
+    env_file:
+      - .env
+    environment:
+      - MODULE_NAME=FirebaseSyncAgent
+      - APP_ID=unassigned
+      - DEVICE_ID=${DEVICE_ID}
+      - FIRESTORE_COLLECTION=sync_events
+      - GATEWAY_URL=http://localhost:8000
+      - DISPLAY_URL=http://localhost:8003
+    volumes:
+      - ./data:/app/data:rw
+      - ./firebase-credentials.json:/app/firebase-credentials.json:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    mem_limit: "256m"
+    cpus: "0.5"

@@ -12,14 +12,26 @@ service cloud.firestore {
       return d.device_id is string
           && d.device_id.size() > 0
           && d.device_id.size() <= 64
-          && d.app_id in ['surgical', 'od', 'inventory'];
+          && d.app_id in ['surgical', 'od', 'inventory', 'inventory_count', 'unassigned'];
     }
 
-    // Device registry — authenticated users can read; writes require valid identity fields
+    // Users — authenticated users can read/write their own profile
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Device registry — authenticated users can read;
+    // Writes: device self-registration requires valid identity fields;
+    // Admin metadata updates (project_id, location, customer_id) allowed without identity fields.
     match /devices/{deviceId} {
       allow read: if isAuthenticated();
-      allow create, update: if isAuthenticated() && validDeviceFields();
-      allow delete: if false;
+      allow create: if isAuthenticated() && validDeviceFields();
+      allow update: if isAuthenticated() && (
+        validDeviceFields()
+        || !request.resource.data.keys().hasAny(['device_id', 'app_id'])
+      );
+      allow delete: if isAuthenticated();
     }
 
     // App Types — authenticated users can read and write
@@ -73,6 +85,17 @@ service cloud.firestore {
     match /inspection_log/{deviceId} {
       allow read: if isAuthenticated();
       allow write: if false;
+    }
+
+    // Gas inventory count events — backend (Admin SDK) writes only
+    match /inventory_count_events/{eventId} {
+      allow read: if isAuthenticated();
+      allow write: if false;
+    }
+
+    // Gas config — per-device configuration (threshold, location, operator)
+    match /gas_config/{deviceId} {
+      allow read, write: if isAuthenticated();
     }
   }
 }

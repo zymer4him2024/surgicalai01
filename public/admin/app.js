@@ -1,8 +1,10 @@
-import { getFirestore, collection, query, orderBy, limit, onSnapshot, where, doc, setDoc, addDoc, deleteDoc, updateDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { getFirestore, collection, query, orderBy, limit, onSnapshot, where, doc, setDoc, addDoc, deleteDoc, updateDoc, serverTimestamp, getDoc, writeBatch } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { getStorage, ref, uploadBytesResumable, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
 import { app } from "../firebase-config.js";
 import { setupAuthUI, getCurrentUser } from "../auth.js";
 
 const db = getFirestore(app);
+const storage = getStorage(app);
 
 // Active device — null until user selects one from the devices panel
 let ACTIVE_DEVICE_ID = null;
@@ -39,34 +41,39 @@ function requireLogin() {
     if (unsubscribeModels) { unsubscribeModels(); unsubscribeModels = null; }
     if (unsubscribeApplications) { unsubscribeApplications(); unsubscribeApplications = null; }
     if (unsubscribeAppTypes) { unsubscribeAppTypes(); unsubscribeAppTypes = null; }
+    if (unsubscribeUsers) { unsubscribeUsers(); unsubscribeUsers = null; }
     unsubscribeOverview.forEach(u => u());
     unsubscribeOverview = [];
     if (statusAgeInterval) { clearInterval(statusAgeInterval); statusAgeInterval = null; }
 }
 
 function loggedIn(user) {
-    authOverlay.classList.add('hidden');
-    mainContent.classList.remove('hidden');
-    userEmailDisplay.innerText = user.email;
-    initOverview();
-    initAppTypes();
-    initApplications();
-    initModels();
-    initProjects();
-    initListener();
-    initTargetConfig();
-    initCustomers();
-    initDevices();
-    // Status and control panels start idle — activated when user selects a device
+    // Admin page requires admin custom claim — approved-but-non-admin users are redirected
+    user.getIdTokenResult().then(token => {
+        if (!token.claims.admin) {
+            requireLogin();
+            return;
+        }
+        authOverlay.classList.add('hidden');
+        mainContent.classList.remove('hidden');
+        userEmailDisplay.innerText = user.email;
+        initOverview();
+        initAppTypes();
+        initApplications();
+        initModels();
+        initProjects();
+        initListener();
+        initCustomers();
+        initDevices();
+        initUsers();
+        // Status and control panels start idle — activated when user selects a device
+    });
 }
 
 setupAuthUI(requireLogin, loggedIn);
 
 // Modal Logic
 closeModal.addEventListener('click', () => modal.classList.add('hidden'));
-modal.addEventListener('click', (e) => {
-    if (e.target === modal) modal.classList.add('hidden');
-});
 
 function openSnapshots(urls) {
     sliderContainer.innerHTML = '';
@@ -384,87 +391,6 @@ function initControlPanel() {
     }, (err) => console.error("Control panel listener error:", err));
 }
 
-// ── DATA INFO — Preset Cycle Configuration ────────────────────────────────────
-
-const SURGICAL_CLASSES = [
-    'Overholt Clamp', 'Metz. Scissor', 'Sur. Scissor', 'Needle Holder',
-    'Sur. Forceps', 'Atr. Forceps', 'Scalpel', 'Retractor',
-    'Hook', 'Lig. Clamp', 'Peri. Clamp', 'Bowl', 'Tong',
-];
-
-const jobStatusMsg = document.getElementById('job-status-msg');
-const startInspectionBtn = document.getElementById('start-inspection-btn');
-const clearTargetBtn = document.getElementById('clear-target-btn');
-
-// Generate 5 random preset sets (0–2 per class) on page load
-const PRESET_SETS = Array.from({ length: 5 }, (_, i) => ({
-    label: `Set ${i + 1}`,
-    counts: Object.fromEntries(SURGICAL_CLASSES.map(cls => [cls, Math.floor(Math.random() * 3)])),
-}));
-
-function renderPresetSets() {
-    const container = document.getElementById('preset-sets-container');
-    const rows = PRESET_SETS.map((set, idx) => {
-        const nonZero = Object.entries(set.counts).filter(([, v]) => v > 0);
-        const summary = nonZero.length
-            ? nonZero.map(([k, v]) => `<span class="inline-block bg-white/5 border border-white/10 rounded-lg px-2 py-0.5 text-[10px] m-0.5 text-gray-400 font-mono">${k} ×${v}</span>`).join(' ')
-            : '<span class="text-appleMuted italic text-xs ml-2">—</span>';
-        return `<div class="preset-row flex items-center p-3 border-b border-white/5 last:border-0 hover:bg-white/[0.03] transition-all group" data-idx="${idx}">
-            <div class="w-12 shrink-0 text-center">
-                <span class="text-[10px] font-bold text-blue-500/60 group-hover:text-blue-500 transition-colors uppercase tracking-widest">${idx + 1}</span>
-            </div>
-            <div class="flex-1 min-w-0">
-                <div class="flex flex-wrap items-center">
-                    ${summary}
-                </div>
-            </div>
-        </div>`;
-    }).join('');
-
-    container.innerHTML = `<div class="w-full">
-        <div class="flex items-center px-4 py-2 bg-white/5 border-b border-white/10 rounded-t-xl">
-            <span class="text-[9px] font-bold uppercase tracking-[0.2em] text-appleMuted w-12 text-center">Set</span>
-            <span class="text-[9px] font-bold uppercase tracking-[0.2em] text-appleMuted">Configured Instruments</span>
-        </div>
-        <div class="divide-y divide-white/5">${rows}</div>
-    </div>`;
-}
-
-function initTargetConfig() {
-    renderPresetSets();
-}
-
-async function startInspection() {
-    if (!ACTIVE_DEVICE_ID) {
-        jobStatusMsg.textContent = 'Select a device first.';
-        return;
-    }
-    startInspectionBtn.disabled = true;
-    jobStatusMsg.textContent = 'Starting cycle…';
-    try {
-        await setDoc(doc(db, 'job_config', ACTIVE_DEVICE_ID), {
-            app_id: 'surgical',
-            device_id: ACTIVE_DEVICE_ID,
-            sets: PRESET_SETS.map(s => s.counts),
-            cursor: 0,
-            ts: serverTimestamp(),
-        });
-        jobStatusMsg.textContent = 'Cycle started — Set 1 active';
-    } catch (e) {
-        console.error('startInspection error:', e);
-        jobStatusMsg.textContent = 'Error: ' + e.message;
-    } finally {
-        startInspectionBtn.disabled = false;
-    }
-}
-
-function clearTarget() {
-    jobStatusMsg.textContent = '';
-}
-
-startInspectionBtn.addEventListener('click', startInspection);
-clearTargetBtn.addEventListener('click', clearTarget);
-
 // ── Shared action button helper ───────────────────────────────────────────────
 
 function actionBtns(editCls, deleteCls, deleteDataAttrs = '') {
@@ -483,6 +409,7 @@ const closeAppTypeModal = document.getElementById('close-app-type-modal');
 const addAppTypeForm = document.getElementById('add-app-type-form');
 
 let unsubscribeAppTypes = null;
+let unsubscribeUsers = null;
 let appTypesData = [];
 let editingAppTypeId = null;
 
@@ -606,9 +533,6 @@ if (evalModeSelect && evalModeHint) {
 // Modal wiring
 if (addAppTypeBtn) addAppTypeBtn.addEventListener('click', () => openAppTypeModal());
 if (closeAppTypeModal) closeAppTypeModal.addEventListener('click', () => { addAppTypeModal.classList.add('hidden'); editingAppTypeId = null; });
-if (addAppTypeModal) addAppTypeModal.addEventListener('click', e => {
-    if (e.target === addAppTypeModal) { addAppTypeModal.classList.add('hidden'); editingAppTypeId = null; }
-});
 
 // Create/Edit app type form
 if (addAppTypeForm) addAppTypeForm.addEventListener('submit', async e => {
@@ -764,9 +688,6 @@ function updateApplicationSelects(application = null) {
 // Modal wiring
 if (addApplicationBtn) addApplicationBtn.addEventListener('click', () => openApplicationModal());
 if (closeApplicationModal) closeApplicationModal.addEventListener('click', () => { addApplicationModal.classList.add('hidden'); editingApplicationId = null; });
-if (addApplicationModal) addApplicationModal.addEventListener('click', e => {
-    if (e.target === addApplicationModal) { addApplicationModal.classList.add('hidden'); editingApplicationId = null; }
-});
 
 // Create/Edit application form
 if (addApplicationForm) addApplicationForm.addEventListener('submit', async e => {
@@ -835,6 +756,30 @@ const MODEL_STATUS_BADGE = {
     active:     'bg-green-500/15 text-green-400 border-green-500/20',
     deprecated: 'bg-gray-500/15 text-gray-400 border-gray-500/20',
 };
+const CONVERSION_STATUS_BADGE = {
+    uploading:          'bg-gray-500/15 text-gray-400 border-gray-500/20',
+    pending_conversion: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/20',
+    processing:         'bg-blue-500/15 text-blue-400 border-blue-500/20',
+    ready:              'bg-green-500/15 text-green-400 border-green-500/20',
+    failed:             'bg-red-500/15 text-red-400 border-red-500/20',
+};
+
+// Estimate conversion progress (0–100) from log lines
+function conversionProgress(log, status) {
+    if (status === 'ready') return 100;
+    if (status === 'failed') return 100;
+    if (!Array.isArray(log) || log.length === 0) return 0;
+    const joined = log.join('\n');
+    if (/Uploading HEF/i.test(joined))   return 92;
+    if (/hailo_compile/i.test(joined))   return 80;
+    if (/hailo_optimize/i.test(joined))  return 62;
+    if (/hailo_parse/i.test(joined))     return 46;
+    if (/export_onnx/i.test(joined))     return 30;
+    if (/inspect_model/i.test(joined))   return 18;
+    if (/Downloading/i.test(joined))     return 8;
+    if (/Conversion started/i.test(joined)) return 4;
+    return 2;
+}
 
 function initModels() {
     if (unsubscribeModels) unsubscribeModels();
@@ -873,12 +818,25 @@ function renderModels() {
             <th class="pb-2 text-[9px] font-bold uppercase tracking-widest text-gray-500 text-left pr-4">Resolution</th>
             <th class="pb-2 text-[9px] font-bold uppercase tracking-widest text-gray-500 text-left pr-4">Classes</th>
             <th class="pb-2 text-[9px] font-bold uppercase tracking-widest text-gray-500 text-left pr-4">Status</th>
+            <th class="pb-2 text-[9px] font-bold uppercase tracking-widest text-gray-500 text-left pr-4">HEF</th>
             <th class="pb-2 text-[9px] font-bold uppercase tracking-widest text-gray-500 text-right"></th>
         </tr>
         ${modelsData.map(m => {
             const typeBadge = MODEL_TYPE_BADGE[m.type] || MODEL_TYPE_BADGE.internal;
             const statusBadge = MODEL_STATUS_BADGE[m.status] || MODEL_STATUS_BADGE.active;
             const classCount = Array.isArray(m.class_labels) ? m.class_labels.length : (m.class_count ?? '—');
+            const convStatus = m.conversion_status;
+            const convBadge = convStatus ? CONVERSION_STATUS_BADGE[convStatus] || CONVERSION_STATUS_BADGE.pending_conversion : null;
+            const convLabel = convStatus ? convStatus.replace(/_/g, ' ') : null;
+            const hasLog = Array.isArray(m.conversion_log) && m.conversion_log.length > 0;
+            const logId = `conv-log-${m.id}`;
+            const pct = convStatus ? conversionProgress(m.conversion_log, convStatus) : 0;
+            const isActive = convStatus === 'uploading' || convStatus === 'pending_conversion' || convStatus === 'processing';
+            const barColor = convStatus === 'ready' ? '#34c759'
+                           : convStatus === 'failed' ? '#ff3b30'
+                           : convStatus === 'processing' ? '#0a84ff'
+                           : convStatus === 'pending_conversion' ? '#ff9f0a'
+                           : '#8e8e93';
             return `
             <tr class="group hover:bg-white/[0.03] transition-all">
                 <td class="py-3 pr-4">
@@ -894,6 +852,29 @@ function renderModels() {
                 <td class="py-3 pr-4">
                     <span class="status-badge border ${statusBadge}">${m.status || 'active'}</span>
                 </td>
+                <td class="py-3 pr-4">
+                    ${convBadge ? `
+                    <div class="flex flex-col gap-1.5" style="min-width:90px">
+                        <div class="flex items-center justify-between gap-2">
+                            <span class="status-badge border ${convBadge} text-[9px]">${convLabel}</span>
+                            ${isActive ? `<span class="text-[9px] text-gray-500 font-mono">${pct}%</span>` : ''}
+                        </div>
+                        <div class="conv-progress-track">
+                            <div class="conv-progress-fill ${isActive && pct < 8 ? 'indeterminate' : ''}"
+                                 style="width:${pct}%; background:${barColor}"></div>
+                        </div>
+                        ${convStatus === 'ready' && m.hef_download_url ? `
+                        <a href="${escapeHtml(m.hef_download_url)}" target="_blank" class="text-[9px] text-indigo-400 hover:text-indigo-300 underline underline-offset-2">Download HEF</a>
+                        ` : ''}
+                        ${convStatus === 'failed' ? `
+                        <button class="retry-conv-btn text-[9px] text-yellow-500 hover:text-yellow-300 text-left" data-id="${m.id}">Retry</button>
+                        ` : ''}
+                        ${hasLog ? `
+                        <button class="toggle-log-btn text-[9px] text-gray-500 hover:text-gray-300 text-left" data-log-id="${logId}">View log</button>
+                        ` : ''}
+                    </div>
+                    ` : '<span class="text-gray-700 text-xs">—</span>'}
+                </td>
                 <td class="py-3 text-right">
                     <div class="flex items-center gap-1 justify-end">
                         <button class="edit-model-btn w-7 h-7 flex items-center justify-center rounded-lg bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10 hover:text-white transition-colors" data-id="${m.id}" title="Edit">
@@ -904,9 +885,37 @@ function renderModels() {
                         </button>
                     </div>
                 </td>
-            </tr>`;
+            </tr>
+            ${hasLog ? `
+            <tr id="${logId}" class="hidden">
+                <td colspan="7" class="pb-3 pr-4">
+                    <div class="bg-black/40 border border-white/5 rounded-xl px-3 py-2 max-h-40 overflow-y-auto custom-scrollbar">
+                        <pre class="text-[10px] text-gray-400 font-mono whitespace-pre-wrap">${(m.conversion_log || []).join('\n')}</pre>
+                    </div>
+                </td>
+            </tr>` : ''}`;
         }).join('')}`;
 
+    modelsTableBody.querySelectorAll('.retry-conv-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            try {
+                await updateDoc(doc(db, 'models', btn.dataset.id), {
+                    conversion_status: 'pending_conversion',
+                    error_message: null,
+                });
+            } catch (err) { alert('Failed to retry: ' + err.message); }
+        });
+    });
+
+    modelsTableBody.querySelectorAll('.toggle-log-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const row = document.getElementById(btn.dataset.logId);
+            if (row) {
+                row.classList.toggle('hidden');
+                btn.textContent = row.classList.contains('hidden') ? 'View log' : 'Hide log';
+            }
+        });
+    });
     modelsTableBody.querySelectorAll('.edit-model-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             const model = modelsData.find(m => m.id === btn.dataset.id);
@@ -922,12 +931,107 @@ function renderModels() {
     });
 }
 
+// ── Convert → HEF modal wiring ──────────────────────────────────────────────
+const convertHefBtn = document.getElementById('convert-hef-btn');
+const convertHefModal = document.getElementById('convert-hef-modal');
+const closeConvertModal = document.getElementById('close-convert-modal');
+const convertHefForm = document.getElementById('convert-hef-form');
+
+if (convertHefBtn) convertHefBtn.addEventListener('click', () => {
+    convertHefModal.classList.remove('hidden');
+});
+if (closeConvertModal) closeConvertModal.addEventListener('click', () => {
+    convertHefModal.classList.add('hidden');
+    convertHefForm.reset();
+    document.getElementById('conv-upload-progress').classList.add('hidden');
+    document.getElementById('conv-error-msg').classList.add('hidden');
+});
+
+if (convertHefForm) convertHefForm.addEventListener('submit', async e => {
+    e.preventDefault();
+    const submitBtn = document.getElementById('conv-submit-btn');
+    const errorMsg = document.getElementById('conv-error-msg');
+    const progressDiv = document.getElementById('conv-upload-progress');
+    const progressBar = document.getElementById('conv-progress-bar');
+    const progressPct = document.getElementById('conv-progress-pct');
+
+    errorMsg.classList.add('hidden');
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Uploading…';
+
+    const modelName = document.getElementById('conv-model-name').value.trim();
+    const format = document.getElementById('conv-format').value;
+    const hwArch = document.getElementById('conv-hw-arch').value;
+    const file = document.getElementById('conv-file').files[0];
+
+    if (!file) {
+        errorMsg.textContent = 'Please select a file.';
+        errorMsg.classList.remove('hidden');
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Upload & Start Conversion';
+        return;
+    }
+
+    try {
+        // Create doc with status "uploading" — converter ignores this until upload finishes
+        const modelRef = await addDoc(collection(db, 'models'), {
+            name: modelName,
+            version: '1.0.0',
+            type: 'internal',
+            framework: format === 'pt' ? 'yolov8' : 'custom',
+            hw_arch: hwArch,
+            original_format: format,
+            conversion_status: 'uploading',
+            conversion_log: [],
+            status: 'active',
+            created_at: serverTimestamp(),
+        });
+        const modelId = modelRef.id;
+        const storagePath = `uploads/raw/${modelId}/original.${format}`;
+
+        // Upload to Firebase Storage
+        progressDiv.classList.remove('hidden');
+        const storageRef = ref(storage, storagePath);
+        const uploadTask = uploadBytesResumable(storageRef, file);
+
+        uploadTask.on('state_changed',
+            snapshot => {
+                const pct = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
+                progressBar.style.width = pct + '%';
+                progressPct.textContent = pct + '%';
+            },
+            err => {
+                errorMsg.textContent = 'Upload failed: ' + err.message;
+                errorMsg.classList.remove('hidden');
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Upload & Start Conversion';
+            },
+            async () => {
+                // File is fully uploaded — now set pending_conversion so converter picks it up
+                await updateDoc(doc(db, 'models', modelId), {
+                    storage_raw_path: storagePath,
+                    model_name: modelName,
+                    conversion_status: 'pending_conversion',
+                });
+                convertHefModal.classList.add('hidden');
+                convertHefForm.reset();
+                progressDiv.classList.add('hidden');
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Upload & Start Conversion';
+                document.querySelector('[data-tab="models"]').click();
+            }
+        );
+    } catch (err) {
+        errorMsg.textContent = 'Error: ' + err.message;
+        errorMsg.classList.remove('hidden');
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Upload & Start Conversion';
+    }
+});
+
 // Modal wiring
 if (addModelBtn) addModelBtn.addEventListener('click', () => openModelModal());
 if (closeModelModal) closeModelModal.addEventListener('click', () => { addModelModal.classList.add('hidden'); editingModelId = null; });
-if (addModelModal) addModelModal.addEventListener('click', e => {
-    if (e.target === addModelModal) { addModelModal.classList.add('hidden'); editingModelId = null; }
-});
 
 // Create/Edit model form
 if (addModelForm) addModelForm.addEventListener('submit', async e => {
@@ -993,9 +1097,10 @@ function openProjectModal(project = null) {
 }
 
 const APP_ID_BADGE = {
-    surgical: 'bg-blue-500/15 text-blue-400 border-blue-500/20',
-    od:       'bg-purple-500/15 text-purple-400 border-purple-500/20',
-    inventory:'bg-amber-500/15 text-amber-400 border-amber-500/20',
+    surgical:        'bg-blue-500/15 text-blue-400 border-blue-500/20',
+    od:              'bg-purple-500/15 text-purple-400 border-purple-500/20',
+    inventory:       'bg-amber-500/15 text-amber-400 border-amber-500/20',
+    inventory_count: 'bg-teal-500/15 text-teal-400 border-teal-500/20',
 };
 const STATUS_BADGE = {
     active:   'bg-green-500/15 text-green-400 border-green-500/20',
@@ -1084,9 +1189,38 @@ function renderProjects() {
     });
     projectsTableBody.querySelectorAll('.delete-project-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
-            if (!confirm(`Delete project "${btn.dataset.name}"?`)) return;
-            try { await deleteDoc(doc(db, 'projects', btn.dataset.id)); }
-            catch (err) { alert('Failed to delete: ' + err.message); }
+            if (!confirm(`Delete project "${btn.dataset.name}"?\n\nThe project will be removed. Linked devices, application, and model references will be unlinked but not deleted.`)) return;
+            try {
+                const projectId = btn.dataset.id;
+                const batch = writeBatch(db);
+
+                // Delete the project document
+                batch.delete(doc(db, 'projects', projectId));
+
+                // Clear project_id on any linked applications
+                applicationsData
+                    .filter(a => a.project_id === projectId)
+                    .forEach(a => batch.update(doc(db, 'applications', a.id), { project_id: null }));
+
+                // Clear project_id on any linked devices and clean up device-specific collections
+                const project = projectsData.find(p => p.id === projectId);
+                const linkedDeviceIds = project?.device_ids || [];
+                linkedDeviceIds.forEach(docId => {
+                    batch.update(doc(db, 'devices', docId), {
+                        project_id: null,
+                        updated_at: serverTimestamp(),
+                    });
+                    // Cascade-clean client-writable device collections
+                    const device = devicesData.find(d => d.id === docId);
+                    if (device?.device_id) {
+                        batch.delete(doc(db, 'device_control', device.device_id));
+                        batch.delete(doc(db, 'job_config', device.device_id));
+                        batch.delete(doc(db, 'gas_config', device.device_id));
+                    }
+                });
+
+                await batch.commit();
+            } catch (err) { alert('Failed to delete: ' + err.message); }
         });
     });
 }
@@ -1169,7 +1303,6 @@ function closeProjectDetail() {
 }
 
 if (closeProjectDetailBtn) closeProjectDetailBtn.addEventListener('click', closeProjectDetail);
-if (projectDetailBackdrop) projectDetailBackdrop.addEventListener('click', closeProjectDetail);
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1213,9 +1346,6 @@ function updateProjectCustomerSelect() { updateProjectSelects(); }
 // Modal wiring
 if (addProjectBtn) addProjectBtn.addEventListener('click', () => openProjectModal());
 if (closeProjectModal) closeProjectModal.addEventListener('click', () => { addProjectModal.classList.add('hidden'); editingProjectId = null; });
-if (addProjectModal) addProjectModal.addEventListener('click', e => {
-    if (e.target === addProjectModal) { addProjectModal.classList.add('hidden'); editingProjectId = null; }
-});
 
 // Create/Edit project form
 if (addProjectForm) addProjectForm.addEventListener('submit', async e => {
@@ -1240,14 +1370,70 @@ if (addProjectForm) addProjectForm.addEventListener('submit', async e => {
         updated_at: serverTimestamp(),
     };
     try {
+        let projectId;
+        let oldDeviceIds = [];
+
         if (editingProjectId) {
+            // Read old device_ids before overwriting so we can detect removals
+            const existing = await getDoc(doc(db, 'projects', editingProjectId));
+            if (existing.exists()) {
+                oldDeviceIds = existing.data().device_ids || [];
+            }
             await updateDoc(doc(db, 'projects', editingProjectId), fields);
+            projectId = editingProjectId;
         } else {
-            await addDoc(collection(db, 'projects'), {
+            const ref = await addDoc(collection(db, 'projects'), {
                 ...fields,
                 created_at: serverTimestamp(),
             });
+            projectId = ref.id;
         }
+
+        // Back-write project_id to newly linked devices + send reset signal
+        const addedIds = selectedDeviceIds.filter(id => !oldDeviceIds.includes(id));
+        for (const docId of addedIds) {
+            try {
+                await updateDoc(doc(db, 'devices', docId), {
+                    project_id: projectId,
+                    updated_at: serverTimestamp(),
+                });
+                const device = devicesData.find(d => d.id === docId);
+                if (device?.device_id) {
+                    const projectModel = modelsData.find(m => m.id === fields.model_id);
+                    const hefModel = projectModel?.hef_path?.replace('/app/models/', '') || '';
+                    const composeFile = fields.app_id === 'inventory_count'
+                        ? 'docker-compose.gas.yml'
+                        : 'docker-compose.yml';
+                    await setDoc(doc(db, 'device_control', device.device_id), {
+                        inference_running: true,
+                        camera_active: true,
+                        display_active: true,
+                        reset: true,
+                        project_id: projectId,
+                        app_id: fields.app_id,
+                        hef_model: hefModel,
+                        compose_file: composeFile,
+                        ts: serverTimestamp(),
+                    });
+                }
+            } catch (linkErr) {
+                console.warn('Device link update failed for', docId, linkErr);
+            }
+        }
+
+        // Clear project_id from devices removed from this project
+        const removedIds = oldDeviceIds.filter(id => !selectedDeviceIds.includes(id));
+        for (const docId of removedIds) {
+            try {
+                await updateDoc(doc(db, 'devices', docId), {
+                    project_id: null,
+                    updated_at: serverTimestamp(),
+                });
+            } catch (unlinkErr) {
+                console.warn('Device unlink update failed for', docId, unlinkErr);
+            }
+        }
+
         editingProjectId = null;
         e.target.reset();
         addProjectModal.classList.add('hidden');
@@ -1316,9 +1502,14 @@ const INDUSTRY_BADGE = {
     other:          'bg-gray-500/15 text-gray-400 border-gray-500/20',
 };
 
+const CUSTOMER_STATUS_BADGE = {
+    pending: 'bg-amber-500/15 text-amber-400 border-amber-500/20',
+    active:  'bg-green-500/15 text-green-400 border-green-500/20',
+};
+
 function renderCustomers() {
     if (customersData.length === 0) {
-        customersTableBody.innerHTML = '<tr><td colspan="5" class="py-12 text-center text-appleMuted italic text-xs">No customers found.</td></tr>';
+        customersTableBody.innerHTML = '<tr><td colspan="6" class="py-12 text-center text-appleMuted italic text-xs">No customers found.</td></tr>';
         return;
     }
     customersTableBody.innerHTML = `
@@ -1327,11 +1518,17 @@ function renderCustomers() {
             <th class="pb-2 text-[9px] font-bold uppercase tracking-widest text-gray-500 text-left pr-4">Contact</th>
             <th class="pb-2 text-[9px] font-bold uppercase tracking-widest text-gray-500 text-left pr-4">Industry</th>
             <th class="pb-2 text-[9px] font-bold uppercase tracking-widest text-gray-500 text-left pr-4">Country</th>
+            <th class="pb-2 text-[9px] font-bold uppercase tracking-widest text-gray-500 text-left pr-4">Status</th>
             <th class="pb-2 text-[9px] font-bold uppercase tracking-widest text-gray-500 text-right"></th>
         </tr>
         ${customersData.map(c => {
             const industryBadge = INDUSTRY_BADGE[c.industry] || INDUSTRY_BADGE.other;
             const industryLabel = c.industry ? c.industry.replace('_', ' ') : '—';
+            const status = c.status || 'pending';
+            const statusBadge = CUSTOMER_STATUS_BADGE[status] || CUSTOMER_STATUS_BADGE.pending;
+            const approveBtn = status === 'pending'
+                ? `<button class="approve-customer-btn px-2.5 py-1 rounded-lg bg-green-500/10 text-green-400 text-[10px] font-medium border border-green-500/20 hover:bg-green-500/20 transition-colors" data-id="${c.id}">Approve</button>`
+                : '';
             return `
             <tr class="group hover:bg-white/[0.03] transition-all">
                 <td class="py-3 pr-4">
@@ -1347,8 +1544,12 @@ function renderCustomers() {
                     <span class="status-badge border ${industryBadge} text-[9px]">${industryLabel}</span>
                 </td>
                 <td class="py-3 pr-4 text-xs text-gray-500">${c.country || '—'}</td>
+                <td class="py-3 pr-4">
+                    <span class="status-badge border ${statusBadge} text-[9px]">${status}</span>
+                </td>
                 <td class="py-3 text-right">
                     <div class="flex items-center gap-1.5 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                        ${approveBtn}
                         <button class="edit-customer-btn px-2.5 py-1 rounded-lg bg-white/5 text-gray-300 text-[10px] font-medium border border-white/10 hover:bg-white/10 transition-colors" data-id="${c.id}">Edit</button>
                         <button class="delete-customer-btn px-2.5 py-1 rounded-lg bg-red-500/10 text-red-400 text-[10px] font-medium border border-red-500/20 hover:bg-red-500/20 transition-colors" data-id="${c.id}" data-name="${c.name}">Delete</button>
                     </div>
@@ -1356,6 +1557,19 @@ function renderCustomers() {
             </tr>`;
         }).join('')}`;
 
+    customersTableBody.querySelectorAll('.approve-customer-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            try {
+                await updateDoc(doc(db, 'customers', btn.dataset.id), {
+                    status: 'active',
+                    approved_at: serverTimestamp(),
+                });
+            } catch (err) {
+                console.error('Approve customer error:', err);
+                alert('Failed to approve: ' + err.message);
+            }
+        });
+    });
     customersTableBody.querySelectorAll('.delete-customer-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
             const name = btn.dataset.name;
@@ -1454,9 +1668,6 @@ function renderDevices(devicesData) {
 
 window.selectDevice = function(deviceId) {
     ACTIVE_DEVICE_ID = deviceId;
-    // Update preset path label
-    const pathLabel = document.getElementById('preset-path-label');
-    if (pathLabel) pathLabel.textContent = `/job_config/${deviceId}`;
     // Restart device-scoped listeners
     initStatusPanel();
     initControlPanel();
@@ -1476,11 +1687,9 @@ window.selectDevice = function(deviceId) {
 // Modals
 addCustomerBtn.addEventListener('click', () => openCustomerModal());
 closeCustomerModal.addEventListener('click', () => { addCustomerModal.classList.add('hidden'); editingCustomerId = null; });
-addCustomerModal.addEventListener('click', (e) => { if (e.target === addCustomerModal) { addCustomerModal.classList.add('hidden'); editingCustomerId = null; } });
 
 addDeviceBtn.addEventListener('click', () => openDeviceModal());
 closeDeviceModal.addEventListener('click', () => { addDeviceModal.classList.add('hidden'); editingDeviceId = null; });
-addDeviceModal.addEventListener('click', (e) => { if (e.target === addDeviceModal) { addDeviceModal.classList.add('hidden'); editingDeviceId = null; } });
 
 // Forms
 addCustomerForm.addEventListener('submit', async (e) => {
@@ -1503,7 +1712,7 @@ addCustomerForm.addEventListener('submit', async (e) => {
         if (editingCustomerId) {
             await updateDoc(doc(db, 'customers', editingCustomerId), { ...fields, updated_at: serverTimestamp() });
         } else {
-            await addDoc(collection(db, "customers"), { ...fields, created_at: serverTimestamp() });
+            await addDoc(collection(db, "customers"), { ...fields, status: 'pending', created_at: serverTimestamp() });
         }
         editingCustomerId = null;
         e.target.reset();
@@ -1533,6 +1742,7 @@ addDeviceForm.addEventListener('submit', async (e) => {
         } else {
             await addDoc(collection(db, "devices"), {
                 device_id: document.getElementById('device-id-input').value.trim(),
+                app_id: "unassigned",
                 customer_id: document.getElementById('device-customer').value,
                 location: document.getElementById('device-location').value.trim(),
                 status: "active",
@@ -1572,4 +1782,104 @@ function initListener() {
     }, (error) => {
         console.error("Firestore Listen Error:", error);
     });
+}
+
+// ── Users Tab ──────────────────────────────────────────────────────────────────
+
+function initUsers() {
+    const q = query(collection(db, 'users'), orderBy('created_at', 'desc'));
+    unsubscribeUsers = onSnapshot(q, (snap) => {
+        const users = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        renderUsers(users);
+    }, (err) => {
+        console.error('Users listener error:', err);
+    });
+}
+
+function renderUsers(users) {
+    const pending = users.filter(u => !u.approved);
+    const approved = users.filter(u => u.approved);
+
+    const badge = document.getElementById('pending-users-badge');
+    if (badge) {
+        badge.textContent = pending.length;
+        badge.classList.toggle('hidden', pending.length === 0);
+    }
+
+    const pendingEl = document.getElementById('users-pending-list');
+    const approvedEl = document.getElementById('users-approved-list');
+
+    pendingEl.innerHTML = pending.length
+        ? pending.map(u => `
+            <div class="flex items-center justify-between p-3 bg-amber-500/5 border border-amber-500/15 rounded-xl">
+                <div class="min-w-0">
+                    <p class="text-sm font-medium text-white truncate">${escapeHtml(u.email || u.id)}</p>
+                    <p class="text-[10px] text-gray-500 mt-0.5">${u.display_name ? escapeHtml(u.display_name) + ' · ' : ''}Registered ${u.created_at?.toDate ? u.created_at.toDate().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}</p>
+                </div>
+                <div class="flex items-center gap-2 shrink-0 ml-4">
+                    <button onclick="window.approveUser('${u.id}')"
+                        class="px-3 py-1.5 text-[11px] font-bold bg-green-500/15 text-green-400 border border-green-500/20 rounded-lg hover:bg-green-500 hover:text-white transition-all">
+                        Approve
+                    </button>
+                    <button onclick="window.denyUser('${u.id}')"
+                        class="px-3 py-1.5 text-[11px] font-bold bg-red-500/10 text-red-400 border border-red-500/20 rounded-lg hover:bg-red-500 hover:text-white transition-all">
+                        Deny
+                    </button>
+                </div>
+            </div>`)
+            .join('')
+        : '<p class="text-xs italic text-gray-600 py-4 text-center">No pending users.</p>';
+
+    approvedEl.innerHTML = approved.length
+        ? approved.map(u => `
+            <div class="flex items-center justify-between p-3 bg-white/[0.02] border border-white/5 rounded-xl">
+                <div class="min-w-0">
+                    <p class="text-sm font-medium text-white truncate">${escapeHtml(u.email || u.id)}</p>
+                    <p class="text-[10px] text-gray-500 mt-0.5">${u.display_name ? escapeHtml(u.display_name) + ' · ' : ''}Approved</p>
+                </div>
+                <button onclick="window.revokeUser('${u.id}')"
+                    class="shrink-0 ml-4 px-3 py-1.5 text-[11px] font-bold bg-white/5 text-gray-400 border border-white/10 rounded-lg hover:bg-red-500/15 hover:text-red-400 hover:border-red-500/20 transition-all">
+                    Revoke
+                </button>
+            </div>`)
+            .join('')
+        : '<p class="text-xs italic text-gray-600 py-4 text-center">No approved users.</p>';
+}
+
+window.approveUser = async function (uid) {
+    try {
+        await updateDoc(doc(db, 'users', uid), { approved: true });
+    } catch (err) {
+        console.error('Approve error:', err);
+        alert('Failed to approve user.');
+    }
+};
+
+window.revokeUser = async function (uid) {
+    if (!confirm('Revoke access for this user?')) return;
+    try {
+        await updateDoc(doc(db, 'users', uid), { approved: false });
+    } catch (err) {
+        console.error('Revoke error:', err);
+        alert('Failed to revoke user.');
+    }
+};
+
+window.denyUser = async function (uid) {
+    if (!confirm('Deny and remove this user request?')) return;
+    try {
+        await deleteDoc(doc(db, 'users', uid));
+    } catch (err) {
+        console.error('Deny error:', err);
+        alert('Failed to deny user.');
+    }
+};
+
+function escapeHtml(str) {
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
 }

@@ -69,6 +69,28 @@
             display: none !important;
         }
 
+        /* Conversion progress bar */
+        .conv-progress-track {
+            height: 4px;
+            border-radius: 2px;
+            background: rgba(255,255,255,0.08);
+            overflow: hidden;
+            min-width: 80px;
+        }
+        .conv-progress-fill {
+            height: 100%;
+            border-radius: 2px;
+            transition: width 0.6s ease;
+        }
+        .conv-progress-fill.indeterminate {
+            width: 40% !important;
+            animation: conv-slide 1.4s ease-in-out infinite;
+        }
+        @keyframes conv-slide {
+            0%   { transform: translateX(-150%); }
+            100% { transform: translateX(350%); }
+        }
+
         .custom-scrollbar::-webkit-scrollbar {
             width: 6px;
         }
@@ -176,12 +198,29 @@
     <!-- Auth Overlay -->
     <div id="auth-overlay"
         class="absolute inset-0 z-50 bg-black/80 backdrop-blur-md flex flex-col items-center justify-center p-6">
-        <div class="glass-card text-center p-10 rounded-2xl max-w-sm w-full">
+
+        <!-- Sign-in card -->
+        <div id="auth-signin-card" class="glass-card text-center p-10 rounded-2xl max-w-sm w-full">
             <h2 class="text-2xl font-medium mb-2 tracking-wide">Admin Panel</h2>
             <p class="text-gray-400 text-sm mb-8">Sign in with Google to continue</p>
             <button
                 class="login-btn w-full bg-white text-black font-medium py-3 px-4 rounded-xl shadow-lg hover:bg-gray-200 transition-colors">
                 Sign in with Google
+            </button>
+        </div>
+
+        <!-- Pending approval card -->
+        <div id="auth-pending-card" class="hidden glass-card text-center p-10 rounded-2xl max-w-sm w-full">
+            <div class="w-12 h-12 rounded-full bg-amber-500/15 border border-amber-500/20 flex items-center justify-center mx-auto mb-4">
+                <svg class="w-6 h-6 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+            </div>
+            <h2 class="text-xl font-medium mb-2 tracking-wide">Pending Approval</h2>
+            <p class="text-gray-400 text-sm mb-2">Your account is awaiting admin approval.</p>
+            <p id="auth-pending-email" class="text-xs text-gray-500 font-mono mb-8"></p>
+            <button class="logout-btn w-full bg-white/5 border border-white/10 text-gray-300 font-medium py-2.5 px-4 rounded-xl hover:bg-white/10 transition-colors text-sm">
+                Sign out
             </button>
         </div>
     </div>
@@ -249,15 +288,6 @@
                         Overview
                     </a>
 
-                    <a href="#" data-tab="projects"
-                        class="nav-tab flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all text-gray-400 hover:text-white hover:bg-white/5 border-l-[3px] border-transparent">
-                        <svg class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
-                        </svg>
-                        Projects
-                    </a>
-
                     <a href="#" data-tab="customers"
                         class="nav-tab flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all text-gray-400 hover:text-white hover:bg-white/5 border-l-[3px] border-transparent">
                         <svg class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -267,13 +297,13 @@
                         Customers
                     </a>
 
-                    <a href="#" data-tab="devices"
+                    <a href="#" data-tab="projects"
                         class="nav-tab flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all text-gray-400 hover:text-white hover:bg-white/5 border-l-[3px] border-transparent">
                         <svg class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+                                d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
                         </svg>
-                        Devices
+                        Projects
                     </a>
 
                     <a href="#" data-tab="models"
@@ -285,6 +315,15 @@
                         Models
                     </a>
 
+                    <a href="#" data-tab="devices"
+                        class="nav-tab flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all text-gray-400 hover:text-white hover:bg-white/5 border-l-[3px] border-transparent">
+                        <svg class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+                        </svg>
+                        Devices
+                    </a>
+
                     <a href="#" data-tab="applications"
                         class="nav-tab flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all text-gray-400 hover:text-white hover:bg-white/5 border-l-[3px] border-transparent">
                         <svg class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -294,13 +333,14 @@
                         Applications
                     </a>
 
-                    <a href="#" data-tab="app-types"
+                    <a href="#" data-tab="users"
                         class="nav-tab flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all text-gray-400 hover:text-white hover:bg-white/5 border-l-[3px] border-transparent">
                         <svg class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                                d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
                         </svg>
-                        App Types
+                        Users
+                        <span id="pending-users-badge" class="ml-auto hidden text-[9px] font-bold bg-amber-500 text-black px-1.5 py-0.5 rounded-full">0</span>
                     </a>
                 </nav>
 
@@ -419,7 +459,7 @@
                             <div class="overflow-y-auto flex-1 custom-scrollbar">
                                 <table class="w-full text-left border-collapse text-sm">
                                     <tbody id="customers-table-body" class="divide-y divide-white/5">
-                                        <tr><td colspan="5" class="py-4 text-center text-gray-500 italic text-xs">Loading customers...</td></tr>
+                                        <tr><td colspan="6" class="py-4 text-center text-gray-500 italic text-xs">Loading customers...</td></tr>
                                     </tbody>
                                 </table>
                             </div>
@@ -471,12 +511,21 @@
                                     </svg>
                                     All Models
                                 </h3>
-                                <button id="add-model-btn"
-                                    class="w-8 h-8 rounded-full bg-purple-500/10 text-purple-400 flex items-center justify-center hover:bg-purple-500 hover:text-white transition-all">
-                                    <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                                        <path fill-rule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clip-rule="evenodd" />
-                                    </svg>
-                                </button>
+                                <div class="flex items-center gap-2">
+                                    <button id="convert-hef-btn"
+                                        class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-500/10 text-indigo-400 text-xs font-medium border border-indigo-500/20 hover:bg-indigo-500/20 hover:text-indigo-300 transition-all">
+                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+                                        </svg>
+                                        Convert → HEF
+                                    </button>
+                                    <button id="add-model-btn"
+                                        class="w-8 h-8 rounded-full bg-purple-500/10 text-purple-400 flex items-center justify-center hover:bg-purple-500 hover:text-white transition-all">
+                                        <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                            <path fill-rule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clip-rule="evenodd" />
+                                        </svg>
+                                    </button>
+                                </div>
                             </div>
                             <div class="overflow-y-auto flex-1 custom-scrollbar">
                                 <table class="w-full text-left border-collapse text-sm">
@@ -492,31 +541,8 @@
                     <div data-panel="applications" class="tab-panel p-6 md:p-8 space-y-8" style="display:none">
                         <header class="mb-6">
                             <h2 class="text-2xl font-medium tracking-wide text-white">Applications</h2>
-                            <p class="text-sm text-gray-400 mt-1">Application configurations including preset cycles and inference thresholds.</p>
+                            <p class="text-sm text-gray-400 mt-1">Application configurations and inference settings.</p>
                         </header>
-
-                        <!-- Preset Cycle (moved from flat layout) -->
-                        <section class="glass-card rounded-2xl p-6">
-                            <div class="flex justify-between items-center mb-5 border-b border-white/10 pb-4">
-                                <h3 class="font-medium text-white">Preset Cycle Configurations</h3>
-                                <span id="preset-path-label"
-                                    class="text-xs font-mono text-gray-500 bg-black/30 px-2 py-1 rounded-md">/job_config/—</span>
-                            </div>
-                            <div id="preset-sets-container"
-                                class="mb-6 bg-black/20 rounded-xl border border-white/5 overflow-hidden"></div>
-                            <div class="flex items-center gap-4">
-                                <button id="start-inspection-btn" class="px-5 py-2 hidden" disabled></button>
-                                <button onclick="document.getElementById('start-inspection-btn').click()"
-                                    class="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white text-sm font-medium rounded-xl shadow-lg shadow-blue-500/20 transition-all transform hover:-translate-y-0.5">
-                                    Generate & Start Cycle
-                                </button>
-                                <button id="clear-target-btn"
-                                    class="px-5 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-sm font-medium rounded-xl transition-colors">
-                                    Reset Focus
-                                </button>
-                                <span id="job-status-msg" class="text-xs text-gray-400 font-mono ml-auto"></span>
-                            </div>
-                        </section>
 
                         <!-- Applications list -->
                         <div class="glass-card rounded-2xl p-6 flex flex-col min-h-[300px]">
@@ -596,6 +622,40 @@
                                         <tr><td colspan="4" class="py-12 text-center text-gray-500 italic text-xs">No app types yet.</td></tr>
                                     </tbody>
                                 </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ── Tab: Users ── -->
+                    <div data-panel="users" class="tab-panel p-6 md:p-8 space-y-8" style="display:none">
+                        <header class="mb-6">
+                            <h2 class="text-2xl font-medium tracking-wide text-white">Users</h2>
+                            <p class="text-sm text-gray-400 mt-1">Manage access to the company dashboard. Approve or deny pending sign-ups.</p>
+                        </header>
+
+                        <!-- Pending Approvals -->
+                        <div class="glass-card rounded-2xl p-6 flex flex-col min-h-[200px]">
+                            <div class="flex justify-between items-center mb-5 border-b border-white/10 pb-4">
+                                <h3 class="font-medium text-white flex items-center gap-2">
+                                    <span class="w-2 h-2 rounded-full bg-amber-400"></span>
+                                    Pending Approval
+                                </h3>
+                            </div>
+                            <div id="users-pending-list" class="space-y-2">
+                                <p class="text-xs italic text-gray-600 py-4 text-center">No pending users.</p>
+                            </div>
+                        </div>
+
+                        <!-- Approved Users -->
+                        <div class="glass-card rounded-2xl p-6 flex flex-col min-h-[200px]">
+                            <div class="flex justify-between items-center mb-5 border-b border-white/10 pb-4">
+                                <h3 class="font-medium text-white flex items-center gap-2">
+                                    <span class="w-2 h-2 rounded-full bg-green-400"></span>
+                                    Approved Users
+                                </h3>
+                            </div>
+                            <div id="users-approved-list" class="space-y-2">
+                                <p class="text-xs italic text-gray-600 py-4 text-center">No approved users.</p>
                             </div>
                         </div>
                     </div>
@@ -823,6 +883,7 @@
                         <option value="surgical">Surgical</option>
                         <option value="od">Object Detection</option>
                         <option value="inventory">Inventory</option>
+                        <option value="inventory_count">Gas Inventory</option>
                     </select>
                 </div>
                 <div>
@@ -997,6 +1058,7 @@
                         <option value="surgical">Surgical</option>
                         <option value="od">Object Detection</option>
                         <option value="inventory">Inventory</option>
+                        <option value="inventory_count">Gas Inventory</option>
                     </select>
                 </div>
                 <div>
@@ -1161,6 +1223,62 @@
                 <span id="pd-app-badge" class="status-badge border"></span>
                 <span id="pd-created" class="text-[10px] text-gray-600 font-mono ml-auto"></span>
             </div>
+        </div>
+    </div>
+
+    <!-- Convert → HEF Modal -->
+    <div id="convert-hef-modal"
+        class="fixed inset-0 z-50 hidden bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+        <div class="glass-card w-full max-w-md rounded-2xl p-6 relative max-h-[90vh] overflow-y-auto custom-scrollbar">
+            <button id="close-convert-modal"
+                class="absolute top-4 right-4 text-gray-400 hover:text-white text-2xl">&times;</button>
+            <h3 class="text-lg font-medium mb-1 text-white">Convert Model → HEF</h3>
+            <p class="text-xs text-gray-500 mb-5">Upload a .pt, .onnx, or .har file. The converter agent will produce a Hailo HEF automatically.</p>
+            <form id="convert-hef-form" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Model Name</label>
+                    <input type="text" id="conv-model-name" placeholder="e.g. SurgeoNet_v2" required
+                        class="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-indigo-500 focus:bg-white/5 transition-all placeholder:text-gray-600">
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Input Format</label>
+                        <select id="conv-format"
+                            class="w-full bg-black/60 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-indigo-500 transition-all cursor-pointer">
+                            <option value="pt">.pt (PyTorch)</option>
+                            <option value="onnx">.onnx</option>
+                            <option value="har">.har (Hailo Archive)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Target Hardware</label>
+                        <select id="conv-hw-arch"
+                            class="w-full bg-black/60 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-indigo-500 transition-all cursor-pointer">
+                            <option value="hailo8">Hailo-8</option>
+                            <option value="hailo8l">Hailo-8L</option>
+                        </select>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Model File</label>
+                    <input type="file" id="conv-file" accept=".pt,.onnx,.har" required
+                        class="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-gray-300 outline-none focus:border-indigo-500 transition-all file:mr-3 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-indigo-500/20 file:text-indigo-400 hover:file:bg-indigo-500/30 cursor-pointer">
+                </div>
+                <div id="conv-upload-progress" class="hidden">
+                    <div class="flex justify-between text-xs text-gray-400 mb-1">
+                        <span>Uploading...</span>
+                        <span id="conv-progress-pct">0%</span>
+                    </div>
+                    <div class="w-full bg-white/10 rounded-full h-1.5">
+                        <div id="conv-progress-bar" class="bg-indigo-500 h-1.5 rounded-full transition-all" style="width:0%"></div>
+                    </div>
+                </div>
+                <p id="conv-error-msg" class="hidden text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2"></p>
+                <button type="submit" id="conv-submit-btn"
+                    class="w-full bg-indigo-500 text-white text-sm font-medium py-2.5 rounded-xl hover:bg-indigo-600 transition-colors mt-2 shadow-lg shadow-indigo-500/20">
+                    Upload &amp; Start Conversion
+                </button>
+            </form>
         </div>
     </div>
 

@@ -15,6 +15,7 @@ Firestore document structure:
     ├── missing_items: list
     ├── detected_items: list
     ├── snapshot_urls: list[str]
+    ├── project_id: str
     ├── timestamp: Timestamp
     └── metadata: dict
 """
@@ -43,6 +44,13 @@ FIRESTORE_COLLECTION = os.getenv("FIRESTORE_COLLECTION", "sync_events")
 # Identity — stamped on every Firestore document
 _APP_ID = os.getenv("APP_ID", "unknown")
 _DEVICE_ID = os.getenv("DEVICE_ID", "unknown")
+_PROJECT_ID = os.getenv("PROJECT_ID", "")
+
+
+def set_project_id(pid: str) -> None:
+    """Update the project_id stamped on subsequent Firestore documents (called on project reassignment)."""
+    global _PROJECT_ID
+    _PROJECT_ID = pid
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -163,6 +171,7 @@ class FirebaseUploader(BaseUploader):
             **payload,
             "app_id": _APP_ID,
             "device_id": _DEVICE_ID,
+            "project_id": _PROJECT_ID,
             "snapshot_urls": storage_urls,
             "timestamp": SERVER_TIMESTAMP,
         })

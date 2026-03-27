@@ -88,3 +88,7 @@ HDMI로 출력되는 실시간 모니터링 화면을 렌더링합니다.
 * **검수 이력 통계**: 당일 기준 총 검수 수량 및 성공률 (Success Rate) 실시간 집계.
 * **시각화 리포트**: Chart.js 기반 도넛 차트를 통한 직관적 현황 제공.
 
+## 5. Core Engineering & Security Standards (Global)
+This repository strictly enforces SOLID principles, TDD, and Docker container security. Code that relies heavily on global state or God-classes will fail code review. For the master rulebook governing AI agents, code formatting, and architecture decisions, please refer directly to the internal project metadata:
+- 👉 **[CLAUDE.md](./CLAUDE.md)**
+- 👉 **[GEMINI.md](./GEMINI.md)**

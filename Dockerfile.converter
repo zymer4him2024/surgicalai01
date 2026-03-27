@@ -1,0 +1,33 @@
+# Model Converter Agent
+# Runs on Ubuntu x86. Hailo commands execute via docker exec into the
+# Hailo AI SW Suite container — no DFC installation needed here.
+
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 python3.11-dev python3-pip \
+    build-essential cmake libffi-dev \
+    libglib2.0-0 libsm6 libxext6 libxrender-dev libgl1 \
+    docker.io \
+    wget curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 \
+    && update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
+
+WORKDIR /app
+
+COPY requirements.converter.txt .
+RUN python3 -m pip install --upgrade pip setuptools wheel cffi
+RUN pip install --no-cache-dir -r requirements.converter.txt
+
+COPY src/model_converter/ /app/src/model_converter/
+
+ENV PYTHONPATH=/app
+
+EXPOSE 8010
+
+CMD ["python", "-m", "uvicorn", "src.model_converter.main:app", "--host", "0.0.0.0", "--port", "8010"]

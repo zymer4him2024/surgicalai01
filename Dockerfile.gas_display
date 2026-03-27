@@ -1,0 +1,38 @@
+# Dockerfile.gas_display — Gas Display Agent container (HDMI info panel)
+#
+# RPi5: X11 server, DISPLAY=:0, /tmp/.X11-unix mount, ipc: host required
+# Mac: Set DISPLAY_HEADLESS=true
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# OpenCV GUI + X11 runtime dependencies (Debian Trixie package names)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    libgl1 \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
+    libx11-6 \
+    libgtk-3-0 \
+    libgdk-pixbuf-xlib-2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Non-root user
+RUN groupadd -r appgroup --gid=1001 \
+    && useradd -r -g appgroup --uid=1001 --home-dir=/app --shell=/sbin/nologin appuser \
+    && chown -R appuser:appgroup /app
+
+COPY requirements.gas_display.txt .
+RUN pip install --no-cache-dir -r requirements.gas_display.txt
+
+COPY src/ /app/src/
+COPY pyproject.toml .
+
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+
+USER appuser
+
+EXPOSE 8013

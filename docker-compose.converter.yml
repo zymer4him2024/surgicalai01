@@ -1,0 +1,34 @@
+# Model Converter Agent — Ubuntu x86 standalone
+# Run on a Linux x86 workstation with Hailo Dataflow Compiler installed.
+# Do NOT include in docker-compose.yml (RPi target).
+#
+# Usage:
+#   docker compose -f docker-compose.converter.yml up -d --build
+
+services:
+  model_converter_agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.converter
+    container_name: model_converter_agent
+    restart: unless-stopped
+    ports:
+      - "8010:8010"
+    environment:
+      - FIREBASE_CREDENTIALS_PATH=/app/firebase-credentials.json
+      - FIREBASE_STORAGE_BUCKET=${FIREBASE_STORAGE_BUCKET}
+      - POLL_INTERVAL_SEC=${POLL_INTERVAL_SEC:-10}
+      - HAILO_CONTAINER_NAME=hailo8_ai_sw_suite_2025-10_container
+      - HAILO_SHARED_DIR=${HOME}/Downloads/hailo8_ai_sw_suite_2025-10_docker/shared_with_docker
+      - HAILO_CONTAINER_SHARED_DIR=/local/shared_with_docker
+    volumes:
+      - ./firebase-credentials.json:/app/firebase-credentials.json:ro
+      - ./src/model_converter:/app/src/model_converter:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${HOME}/Downloads/hailo8_ai_sw_suite_2025-10_docker/shared_with_docker:${HOME}/Downloads/hailo8_ai_sw_suite_2025-10_docker/shared_with_docker:rw
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8010/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s

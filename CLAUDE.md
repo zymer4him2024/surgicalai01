@@ -43,6 +43,15 @@ All modules communicate via the Docker internal bridge network.
 | Device Master | `device_master_agent` | `172.20.0.15` | `8005` | Internal only | FDA mapping & Cloud Meta DB bridge |
 | Mock External AI | `mock_external_ai` | `172.20.0.16` | `8006` | Internal only | Simulated 3rd-party edge AI (API Mock) |
 
+### Gas Application Network (`gas_bridge` 172.21.0.0/16 — separate RPi)
+| Module | Container Name | Fixed IP | Port | External | Description |
+|---|---|---|---|---|---|
+| Gas Gateway | `gas_gateway_agent` | `172.21.0.10` | `8010` | `localhost:8010` | Gas counting controller, low stock detection |
+| Gas Inference | `gas_inference_agent` | `172.21.0.11` | `8001` | Internal only | Hailo-8 inference (gas cylinder model) |
+| Gas Camera | `gas_camera_agent` | `172.21.0.12` | `8002` | Internal only | 4K camera frame capture |
+| Gas Display | `gas_display_agent` | `172.21.0.13` | `8013` | Internal only | HDMI info panel (no camera feed) |
+| Gas Firebase Sync | `gas_firebase_sync_agent` | `172.21.0.14` | `8004` | Internal only | Async Firestore sync + customer DB push |
+
 ### Network Isolation for 3rd Party AI
 - **`antigravity_bridge`** (`172.20.0.0/16`): Internal service mesh. All Antigravity containers.
 - **`isolated_ai_bridge`** (`172.20.1.0/24`): Air-gapped network (`internal: true`) for 3rd party AI containers. No outbound internet. Gateway is dual-homed (172.20.1.10) to reach it.
@@ -56,6 +65,8 @@ All modules communicate via the Docker internal bridge network.
 |---|---|---|
 | `docker-compose.yml` | **RPi 5 + Hailo-8 target** | `/dev/hailo0` device mapping, `device_cgroup_rules` enabled |
 | `docker-compose.mac.yml` | **Mac local dev/simulation** | No device mapping, `HEF_PATH=/app/models/simulation.hef` |
+| `docker-compose.gas.yml` | **Gas RPi 5 + Hailo-8 target** | Gas cylinder counting, `gas_bridge` network, APP_ID=inventory_count |
+| `docker-compose.gas.mac.yml` | **Gas Mac local dev/simulation** | Gas simulation with mock AI, headless display |
 
 ### Run on Mac (simulation mode)
 ```bash
@@ -103,6 +114,22 @@ Simulates 3rd-party edge inference for integration testing.
 - **Protocol**: HTTP/JSON (Schema intentionally differs from native Module A).
 - **Gateway Adapter**: Gateway Agent includes a translation layer (`_normalize_inference_response`) to handle external schemas.
 
+### Gas Gateway Agent (APP_ID=inventory_count)
+Gas cylinder inventory counting controller. Runs on a separate RPi with its own `.env` (APP_ID=inventory_count).
+- **State Machine**: `COUNTING` (green) ↔ `LOW_STOCK` (red) based on configurable threshold.
+- **Counting Loop**: camera → inference → total count → low stock check → HUD update (thermal-aware).
+- **Sync**: Periodic snapshots to Firebase (`inventory_count_events`) + optional direct push to customer DB.
+- **Endpoints**: `GET /health`, `GET /status`, `POST /snapshot` (manual trigger).
+- **Config**: `LOW_STOCK_THRESHOLD`, `SYNC_INTERVAL_SEC`, `LOCATION_NAME`, `OPERATOR_ID`, `CUSTOMER_DB_URL` from `.env`.
+- **Files**: `src/gas_gateway/` — `config.py`, `schemas.py`, `service.py`, `main.py`.
+
+### Gas Display Agent (Info-Only HUD)
+HDMI info panel for gas inventory. No camera feed on display.
+- **Layout**: Dark background, large total count (green/red), status, location, operator, timestamp.
+- **Render**: 15 FPS, double-buffered, headless mode for Mac simulation.
+- **Endpoints**: `POST /hud`, `GET /health`, `GET /snapshot`.
+- **Files**: `src/gas_display/` — `schemas.py`, `buffer.py`, `hud.py`, `main.py`.
+
 ---
 
 ## 7. System Status (Phase)
@@ -124,7 +151,7 @@ Simulates 3rd-party edge inference for integration testing.
 | 3rd Party AI Mock | Mock service (`mock_external_ai`) and Gateway adapter logic implemented and verified via local simulation. |
 | Label Sync (POC) | Unified instrument names across Dashboard, Inference, and Device Master (e.g., "Sur. Scissor"). |
 | HUD Update | Status text changed from "YES MATCH" to "GOOD" for matched state. |
-| Multitenancy | System supports `APP_ID` (surgical, od, inventory) and `DEVICE_ID` for isolated domain and device management. |
+| Multitenancy | System supports `APP_ID` (surgical, od, inventory, inventory_count) and `DEVICE_ID` for isolated domain and device management. |
 | Bounding Box Overlay | Tracker-smoothed bounding boxes with label + confidence rendered on HDMI display in real time. |
 | SurgicalTracker Improvements | Class voting (10-frame majority vote suppresses jitter). Split EMA: center coordinates responsive (alpha=0.25), bbox size locked after 12 frames (alpha=0.01). |
 | CONF_THRESHOLD Tuned | Inference `CONF_THRESHOLD=0.35` (SurgeoNet). Raised from 0.20 to suppress background hallucinations; 0.55 was too aggressive (zero detections). |
@@ -135,6 +162,7 @@ Simulates 3rd-party edge inference for integration testing.
 | Network Isolation (3rd Party AI) | `isolated_ai_bridge` (`internal: true`) added to docker-compose. Gateway dual-homed. 3rd party containers air-gapped from internet. |
 | Semantic SKU Mapper | `scripts/semantic_map_skus.py`: multilingual embedding pipeline (translate → English embed → cosine similarity) maps manufacturer SKUs to SurgeoNet classes. Thresholds: AUTO=0.60, REVIEW=0.40. |
 | Manufacturer Adapters | `adapters/edlo_adapter.py`, `adapters/rhosse_adapter.py`, `adapters/bahadir_adapter.py`: normalize Edlo (PT), Rhosse (PT), Bahadir (TR/DE/EN) API responses to standard `{sku, name, manufacturer}` format. |
+| Gas Cylinder Inventory Module | New APP_ID=`inventory_count` application (Bringel). Separate `gas_gateway_agent` (port 8010) and `gas_display_agent` (port 8013). Info-only HUD (no camera feed): total count, COUNTING/LOW_STOCK state, location, operator, timestamp. Periodic + manual snapshot sync to Firebase (`inventory_count_events`) and customer DB. Own `.env` per RPi. Compose: `docker-compose.gas.yml` (RPi), `docker-compose.gas.mac.yml` (Mac). Network: `gas_bridge` 172.21.0.0/16. Firestore: `inventory_count_events`, `gas_config/{deviceId}`. |
 
 ### Web Dashboard (Firebase Hosting & Authentication)
 Deployed on Firebase Hosting. Google Login required (enforced via `firestore.rules`).

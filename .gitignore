@@ -39,3 +39,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 firebase-credentials.json
+*.pem
+*.key
+*.p12
+.env.production
+.env.staging
+secrets/

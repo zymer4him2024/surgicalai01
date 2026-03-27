@@ -21,6 +21,14 @@
             "queryScope": "COLLECTION",
             "fields": [
                 { "fieldPath": "device_id", "order": "ASCENDING" },
+                { "fieldPath": "timestamp", "order": "DESCENDING" }
+            ]
+        },
+        {
+            "collectionGroup": "sync_events",
+            "queryScope": "COLLECTION",
+            "fields": [
+                { "fieldPath": "device_id", "order": "ASCENDING" },
                 { "fieldPath": "event_type", "order": "ASCENDING" },
                 { "fieldPath": "timestamp", "order": "DESCENDING" }
             ]
@@ -80,6 +88,22 @@
                 { "fieldPath": "app_id", "order": "ASCENDING" },
                 { "fieldPath": "status", "order": "ASCENDING" },
                 { "fieldPath": "last_seen", "order": "DESCENDING" }
+            ]
+        },
+        {
+            "collectionGroup": "sync_events",
+            "queryScope": "COLLECTION",
+            "fields": [
+                { "fieldPath": "project_id", "order": "ASCENDING" },
+                { "fieldPath": "timestamp", "order": "DESCENDING" }
+            ]
+        },
+        {
+            "collectionGroup": "inventory_count_events",
+            "queryScope": "COLLECTION",
+            "fields": [
+                { "fieldPath": "project_id", "order": "ASCENDING" },
+                { "fieldPath": "timestamp", "order": "DESCENDING" }
             ]
         }
     ],

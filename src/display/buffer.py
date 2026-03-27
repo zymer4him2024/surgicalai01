@@ -152,7 +152,8 @@ class DisplayState:
             if tray_items is not None:
                 self._tray_items = tray_items
             if scan_info is not None:
-                self._scan_info = scan_info
+                # Empty job_id is a sentinel to clear the DATA INFO panel
+                self._scan_info = None if scan_info.job_id == "" else scan_info
             if flash_text is not None:
                 self._flash_text = flash_text
                 self._flash_expires_at = time.monotonic() + 3.0

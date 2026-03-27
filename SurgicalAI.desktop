@@ -2,7 +2,7 @@
 Type=Application
 Name=Start SurgicalAI
 Comment=Start all SurgicalAI containers
-Exec=bash -c "DISPLAY=:0 xhost +local: && cd /home/digioptics_am01/SurgicalAI01 && docker compose up -d && docker restart display_agent"
+Exec=bash -c "cd ~/SurgicalAI01 && bash start_detection.sh; exec bash"
 Icon=utilities-terminal
-Terminal=false
+Terminal=true
 Categories=Application;

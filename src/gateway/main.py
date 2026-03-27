@@ -25,7 +25,7 @@ import cv2
 import httpx
 import numpy as np
 import uvicorn
-from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile, status
+from fastapi import BackgroundTasks, FastAPI, File, Header, HTTPException, UploadFile, status
 from fastapi.responses import JSONResponse
 from pyzbar.pyzbar import decode as qr_decode
 
@@ -55,6 +55,12 @@ DEVICE_MASTER_URL = os.getenv("DEVICE_MASTER_URL", "http://device_master_agent:8
 
 GATEWAY_TIMEOUT = float(os.getenv("GATEWAY_TIMEOUT_SEC", "15"))
 HEALTH_TIMEOUT = 3.0
+MATCH_TOLERANCE = int(os.getenv("MATCH_TOLERANCE", "1"))  # ±N count tolerance for unstable inference
+# Optional API key enforcement. If unset (empty), /job endpoint is open (backwards-compatible).
+# To enable: set GATEWAY_API_KEY=<secret> in .env and pass X-API-Key: <secret> header.
+GATEWAY_API_KEY = os.getenv("GATEWAY_API_KEY", "")
+# 3rd party AI authentication token (sent as Authorization: Bearer header)
+EXTERNAL_AI_TOKEN = os.getenv("EXTERNAL_AI_TOKEN", "")
 QR_SCAN_INTERVAL_SEC = float(os.getenv("QR_SCAN_INTERVAL_SEC", "1.0"))
 QR_DEBOUNCE_SEC = float(os.getenv("QR_DEBOUNCE_SEC", "30.0"))
 try:
@@ -212,7 +218,13 @@ async def force_activate() -> JSONResponse:
 
 
 @app.post("/job", summary="Register new tray inspection job (QR scan simulation)")
-async def create_job(req: JobRequest, background_tasks: BackgroundTasks):
+async def create_job(
+    req: JobRequest,
+    background_tasks: BackgroundTasks,
+    x_api_key: str = Header(default=""),
+):
+    if GATEWAY_API_KEY and x_api_key != GATEWAY_API_KEY:
+        raise HTTPException(status_code=401, detail="Missing or invalid X-API-Key header")
     global _pending_preset, current_job, current_state, mismatch_start_time, _match_achieved_at, _error_achieved_at
     scan_info = {
         "job_id": req.job_id,
@@ -255,9 +267,13 @@ async def predict(
         )
 
     try:
+        inf_headers: dict[str, str] = {"X-App-ID": APP_ID, "X-Device-ID": DEVICE_ID}
+        if EXTERNAL_AI_TOKEN:
+            inf_headers["Authorization"] = f"Bearer {EXTERNAL_AI_TOKEN}"
         resp = await client().post(
             f"{INFERENCE_URL}{INFERENCE_ENDPOINT}",
             files={"image": (image.filename or "image.jpg", image_bytes, image.content_type or "image/jpeg")},
+            headers=inf_headers,
             timeout=GATEWAY_TIMEOUT,
         )
     except Exception as exc:
@@ -310,7 +326,8 @@ def _parse_qr_target(qr_data: str) -> dict[str, int]:
         parsed = _json.loads(qr_data)
         if isinstance(parsed, dict) and "target" in parsed:
             return parsed["target"]
-    except: pass
+    except (ValueError, TypeError) as exc:
+        logger.debug("QR target parse failed: %s — raw=%r", exc, qr_data)
     return DEFAULT_TARGET.copy()
 
 
@@ -417,6 +434,7 @@ async def _counting_loop() -> None:
     _last_cpu_temp: float = 0.0
     _fps_counter = 0
     _fps_start = time.monotonic()
+    _last_pushed_preset: dict | None = None  # track last scan_info pushed to display
 
     while True:
         if not camera_active:
@@ -424,6 +442,22 @@ async def _counting_loop() -> None:
             continue
 
         if not inference_running or not current_job:
+            # Keep DATA INFO panel populated while waiting for QR scan.
+            # Use await (not create_task) so no lingering tasks overwrite the
+            # QR scan loop's scanned_at update after activation.
+            if _pending_preset and _pending_preset.get("scan_info"):
+                if _pending_preset is not _last_pushed_preset:
+                    _last_pushed_preset = _pending_preset
+                    try:
+                        await client().post(
+                            f"{DISPLAY_URL}/hud",
+                            json={"scan_info": _pending_preset["scan_info"]},
+                            timeout=HEALTH_TIMEOUT,
+                        )
+                    except Exception:
+                        pass
+            else:
+                _last_pushed_preset = None
             await asyncio.sleep(0.5)
             continue
 
@@ -462,9 +496,13 @@ async def _counting_loop() -> None:
                 await asyncio.sleep(0.5); continue
             image_bytes = resp.content
 
+            inf_headers: dict[str, str] = {"X-App-ID": APP_ID, "X-Device-ID": DEVICE_ID}
+            if EXTERNAL_AI_TOKEN:
+                inf_headers["Authorization"] = f"Bearer {EXTERNAL_AI_TOKEN}"
             inf_resp = await client().post(
                 f"{INFERENCE_URL}{INFERENCE_ENDPOINT}",
                 files={"image": ("image.jpg", image_bytes, "image/jpeg")},
+                headers=inf_headers,
                 timeout=GATEWAY_TIMEOUT
             )
             if inf_resp.status_code != 200:
@@ -482,7 +520,7 @@ async def _counting_loop() -> None:
 
             target_counts = current_job.get("target", {})
             is_match = bool(target_counts) and all(
-                actual_counts.get(key, 0) == expected
+                abs(actual_counts.get(key, 0) - expected) <= MATCH_TOLERANCE
                 for key, expected in target_counts.items()
             )
 
@@ -734,7 +772,17 @@ async def _advance_to_next_set() -> None:
         await client().post(f"{FIREBASE_SYNC_URL}/advance_set", timeout=5.0)
         logger.info("advance_set requested — next preset set incoming")
     except Exception as exc:
-        logger.debug("advance_set error: %s", exc)
+        logger.warning("advance_set error: %s", exc)
+
+    # Fallback: if Firebase does not call back with the new preset within 5s,
+    # request the current set directly (covers Firestore latency and partial failures)
+    await asyncio.sleep(5.0)
+    if _pending_preset is None and current_job is None:
+        logger.warning("No preset received 5s after advance — falling back to load_current_set")
+        try:
+            await client().post(f"{FIREBASE_SYNC_URL}/load_current_set", timeout=5.0)
+        except Exception as exc:
+            logger.warning("Fallback load_current_set failed: %s", exc)
 
 
 async def _log_inspection_round(result: str, detected_items: list[dict]) -> None:
@@ -762,7 +810,8 @@ async def _trigger_snapshot(devices_resolved: list[dict] | None = None):
         if devices_resolved:
             body["devices_resolved"] = devices_resolved
         await client().post(f"{FIREBASE_SYNC_URL}/snap", json=body, timeout=3.0)
-    except: pass
+    except Exception as exc:
+        logger.debug("Snapshot trigger failed (non-critical): %s", exc)
 
 
 class ControlRequest(BaseModel):
@@ -853,14 +902,16 @@ async def _fetch_module_health(base_url: str, name: str) -> dict[str, Any]:
         data = resp.json()
         data["reachable"] = resp.status_code == 200
         return data
-    except: return {"reachable": False, "status": "unreachable"}
+    except Exception:
+        return {"reachable": False, "status": "unreachable"}
 
 
 async def _fetch_json(url: str) -> dict[str, Any]:
     try:
         resp = await client().get(url, timeout=3.0)
         return resp.json()
-    except: return {"error": "unreachable"}
+    except Exception:
+        return {"error": "unreachable"}
 
 
 def _normalize_inference_response(data: dict) -> dict:
@@ -877,7 +928,7 @@ def _normalize_inference_response(data: dict) -> dict:
             })
         return {
             "detections": normalized_detections,
-            "inference_time_ms": data.get("processing_time_ms", 0.0),
+            "inference_time_ms": data.get("inference_ms", data.get("processing_time_ms", 0.0)),
             "npu_temp_celsius": data.get("device_temp_c", 0.0),
             "thermal_status": "normal"
         }

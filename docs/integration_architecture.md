@@ -9,7 +9,7 @@ As per your conceptual diagram, here is the technical mapping of the data flow:
 ```mermaid
 graph TD
     subgraph "AI Models"
-        InternalModel["Internal Models (YOLOv11 on Hailo-8)"]
+        InternalModel["Internal Models (Neural Network on Hailo-8)"]
         ExternalModel["3rd Party Models (External Edge API)"]
     end
 

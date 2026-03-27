@@ -1,0 +1,21 @@
+[Unit]
+Description=Antigravity Launcher — Project Assignment Watcher
+Documentation=https://github.com/antigravity/SurgicalAI01
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# USER and WORKDIR are filled in by setup_rpi.sh during installation
+User=ANTIGRAVITY_USER
+WorkingDirectory=ANTIGRAVITY_PROJECT_DIR
+ExecStart=ANTIGRAVITY_PROJECT_DIR/scripts/launcher.sh
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=antigravity-launcher
+
+[Install]
+WantedBy=multi-user.target
