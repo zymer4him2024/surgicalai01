@@ -30,6 +30,7 @@ services:
       - DEFAULT_TARGET={}
       - DEVICE_MASTER_URL=http://device_master_agent:8005
     volumes:
+      - ./src:/app/src:ro
       - /sys/class/thermal:/sys/class/thermal:ro
     depends_on:
       camera_agent:
@@ -181,6 +182,7 @@ services:
       - DISPLAY_HEADLESS=false
       - CAMERA_URL=http://camera_agent:8002
     volumes:
+      - ./src:/app/src:ro
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - ${HOME}/.Xauthority:/root/.Xauthority:ro
     devices:
