@@ -85,9 +85,11 @@ CONF_THRESHOLD = float(os.getenv("CONF_THRESHOLD", "0.35"))
 IOU_THRESHOLD = float(os.getenv("IOU_THRESHOLD", "0.45"))
 
 # Whether to normalize input to [0, 1] before passing to SDK.
-# With quantized=False, the Hailo SDK applies HEF-baked normalization (typically /255).
-# Set to "false" (default) so the SDK handles normalization; "true" only if HEF has no normalization.
-NORMALIZE_INPUT = os.getenv("NORMALIZE_INPUT", "false").lower() == "true"
+# SurgeoNet HEF does NOT include internal /255 normalization — requires pre-normalized [0,1] input.
+NORMALIZE_INPUT = os.getenv("NORMALIZE_INPUT", "true").lower() == "true"
+
+# Color channel order: "bgr" or "rgb". YOLOv8 trained with OpenCV uses BGR.
+COLOR_ORDER = os.getenv("COLOR_ORDER", "bgr").lower()
 
 # Flag to log output structure once on first inference
 _hailo_output_logged = False
@@ -308,6 +310,8 @@ def _decode_yolov8_decoupled(
 
     # Decode DFL to box offsets (left, top, right, bottom)
     offsets = _dfl_decode(dfl_tensor, reg_max=16)  # (N, 4)
+    log.info("DIAG DFL offsets: min=%.2f max=%.2f mean=%.2f",
+             float(offsets.min()), float(offsets.max()), float(offsets.mean()))
 
     # Generate anchor points
     anchors = _generate_yolov8_anchors(INPUT_SIZE)  # (N, 3) — cx, cy, stride
@@ -617,6 +621,8 @@ def _decode_image(image_bytes: bytes) -> np.ndarray:
 
     img = Image.open(io.BytesIO(image_bytes)).convert("RGB").resize((INPUT_SIZE, INPUT_SIZE))
     arr = np.asarray(img, dtype=np.float32)
+    if COLOR_ORDER == "bgr":
+        arr = arr[:, :, ::-1].copy()  # RGB → BGR
     if NORMALIZE_INPUT:
         arr = arr / 255.0
     return arr
