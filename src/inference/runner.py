@@ -216,6 +216,16 @@ def _try_load_hailo(hef_path: str, log: logging.Logger) -> bool:
             network_group, quantized=False, format_type=FormatType.FLOAT32
         )
 
+        # Activate network group and pipeline ONCE — reuse across all inferences
+        activated_context = network_group.activate(network_group_params)
+        activated_context.__enter__()
+        pipeline = InferVStreams(
+            network_group, input_vstreams_params, output_vstreams_params
+        )
+        pipeline.__enter__()
+
+        input_name = hef.get_input_vstream_infos()[0].name
+
         _hailo_infer_model = {
             "target": target,
             "network_group": network_group,
@@ -223,8 +233,11 @@ def _try_load_hailo(hef_path: str, log: logging.Logger) -> bool:
             "input_params": input_vstreams_params,
             "output_params": output_vstreams_params,
             "hef": hef,
+            "pipeline": pipeline,
+            "activated_context": activated_context,
+            "input_name": input_name,
         }
-        log.info("Hailo HEF loaded successfully: %s", hef_path)
+        log.info("Hailo HEF loaded + pipeline activated: %s", hef_path)
         # Log input/output vstream info for debugging input format expectations
         for info in hef.get_input_vstream_infos():
             log.info("HEF INPUT vstream: name=%s shape=%s format=%s",
@@ -373,8 +386,6 @@ def _run_hailo_inference(image_bytes: bytes, log: logging.Logger) -> list[dict]:
     DocCheck YOLOv5 models output without integrated NMS (Sigmoid/Transpose end nodes).
     Logs output structure on first inference for debugging.
     """
-    from hailo_platform import InferVStreams  # type: ignore[import]
-
     global _hailo_output_logged, _inference_count
     _inference_count += 1
     m = _hailo_infer_model
@@ -387,17 +398,8 @@ def _run_hailo_inference(image_bytes: bytes, log: logging.Logger) -> list[dict]:
                  float(img_array.min()), float(img_array.max()),
                  float(img_array.mean()), NORMALIZE_INPUT)
 
-    input_data = {
-        m["hef"].get_input_vstream_infos()[0].name: img_array[np.newaxis]
-    }
-
-    with InferVStreams(
-        m["network_group"],
-        m["input_params"],
-        m["output_params"],
-    ) as pipeline:
-        with m["network_group"].activate(m["network_group_params"]):
-            results = pipeline.infer(input_data)
+    input_data = {m["input_name"]: img_array[np.newaxis]}
+    results = m["pipeline"].infer(input_data)
 
     # Log output structure on first inference
     if not _hailo_output_logged:
@@ -591,6 +593,10 @@ def _cleanup_hailo() -> None:
     global _hailo_infer_model
     if _hailo_infer_model is not None:
         try:
+            if "pipeline" in _hailo_infer_model:
+                _hailo_infer_model["pipeline"].__exit__(None, None, None)
+            if "activated_context" in _hailo_infer_model:
+                _hailo_infer_model["activated_context"].__exit__(None, None, None)
             _hailo_infer_model["target"].release()
         except Exception:
             pass
@@ -602,15 +608,24 @@ def _cleanup_hailo() -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _decode_image(image_bytes: bytes) -> np.ndarray:
-    """Binary → (INPUT_SIZE, INPUT_SIZE, 3) float32 numpy array."""
-    from PIL import Image  # type: ignore[import]
+    """Binary → (INPUT_SIZE, INPUT_SIZE, 3) float32 numpy array. Uses OpenCV for speed."""
+    import cv2  # type: ignore[import]
 
-    img = Image.open(io.BytesIO(image_bytes)).convert("RGB").resize((INPUT_SIZE, INPUT_SIZE))
-    arr = np.asarray(img, dtype=np.float32)
-    if COLOR_ORDER == "bgr":
-        arr = arr[:, :, ::-1].copy()  # RGB → BGR
+    buf = np.frombuffer(image_bytes, dtype=np.uint8)
+    img = cv2.imdecode(buf, cv2.IMREAD_COLOR)  # BGR uint8
+    if img is None:
+        # Fallback to PIL if cv2 fails
+        from PIL import Image  # type: ignore[import]
+        pil_img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        img = np.asarray(pil_img, dtype=np.uint8)
+        if COLOR_ORDER == "bgr":
+            img = img[:, :, ::-1]
+    elif COLOR_ORDER != "bgr":
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    img = cv2.resize(img, (INPUT_SIZE, INPUT_SIZE), interpolation=cv2.INTER_LINEAR)
+    arr = img.astype(np.float32)
     if NORMALIZE_INPUT:
-        arr = arr / 255.0
+        arr *= (1.0 / 255.0)
     return arr
 
 
