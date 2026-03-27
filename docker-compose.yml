@@ -75,7 +75,7 @@ services:
     environment:
       - MODULE_NAME=InferenceAgent
       - HAILO_DEVICE=/dev/hailo0
-      - HEF_PATH=/app/models/yolov8m.hef
+      - HEF_PATH=/app/models/surgeonet_416.hef
       # - LABELS_PATH=/app/models/labels.json
       # - INPUT_SIZE=416
       # - CONF_THRESHOLD=0.35
