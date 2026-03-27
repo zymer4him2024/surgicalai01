@@ -161,8 +161,7 @@ class SurgicalTracker:
         iou_pairs: list[tuple[float, int, int]] = []
         for ti, track in enumerate(self.tracks):
             for di, det in enumerate(detections):
-                if track.class_name != det.get("class_name"):
-                    continue
+                # Match by IoU only — class voting handles classification
                 score = _iou(track.predict(), det["bbox"])
                 if score >= self.iou_threshold:
                     iou_pairs.append((score, ti, di))

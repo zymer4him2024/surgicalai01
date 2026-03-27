@@ -101,7 +101,7 @@ _latest_tracked_dets: list[dict] = []
 _tracker = SurgicalTracker(
     max_age=15,        # longer persistence between inference frames
     min_hits=2,        # faster confirmation
-    iou_threshold=0.35,
+    iou_threshold=0.2, # lower threshold — quantized model has bbox jitter
     ema_alpha=0.25,    # low alpha = heavy smoothing (instruments are stationary)
 )
 
