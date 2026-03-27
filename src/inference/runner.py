@@ -84,8 +84,10 @@ SKIP_BACKGROUND = os.getenv("SKIP_BACKGROUND", "true").lower() == "true"
 CONF_THRESHOLD = float(os.getenv("CONF_THRESHOLD", "0.35"))
 IOU_THRESHOLD = float(os.getenv("IOU_THRESHOLD", "0.45"))
 
-# Whether to normalize input to [0, 1] (most YOLOv8 models need this)
-NORMALIZE_INPUT = os.getenv("NORMALIZE_INPUT", "true").lower() == "true"
+# Whether to normalize input to [0, 1] before passing to SDK.
+# With quantized=False, the Hailo SDK applies HEF-baked normalization (typically /255).
+# Set to "false" (default) so the SDK handles normalization; "true" only if HEF has no normalization.
+NORMALIZE_INPUT = os.getenv("NORMALIZE_INPUT", "false").lower() == "true"
 
 # Flag to log output structure once on first inference
 _hailo_output_logged = False
@@ -221,6 +223,13 @@ def _try_load_hailo(hef_path: str, log: logging.Logger) -> bool:
             "hef": hef,
         }
         log.info("Hailo HEF loaded successfully: %s", hef_path)
+        # Log input/output vstream info for debugging input format expectations
+        for info in hef.get_input_vstream_infos():
+            log.info("HEF INPUT vstream: name=%s shape=%s format=%s",
+                     info.name, info.shape, info.format)
+        for info in hef.get_output_vstream_infos():
+            log.info("HEF OUTPUT vstream: name=%s shape=%s format=%s",
+                     info.name, info.shape, info.format)
         return True
     except Exception as exc:
         log.warning("Hailo SDK unavailable (%s) — simulation mode", exc)
