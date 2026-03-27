@@ -84,8 +84,13 @@ SKIP_BACKGROUND = os.getenv("SKIP_BACKGROUND", "true").lower() == "true"
 CONF_THRESHOLD = float(os.getenv("CONF_THRESHOLD", "0.35"))
 IOU_THRESHOLD = float(os.getenv("IOU_THRESHOLD", "0.45"))
 
+# Whether to normalize input to [0, 1] (most YOLOv8 models need this)
+NORMALIZE_INPUT = os.getenv("NORMALIZE_INPUT", "true").lower() == "true"
+
 # Flag to log output structure once on first inference
 _hailo_output_logged = False
+# Counter for periodic diagnostic logging (every 100th inference)
+_inference_count = 0
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -371,9 +376,18 @@ def _run_hailo_inference(image_bytes: bytes, log: logging.Logger) -> list[dict]:
     """
     from hailo_platform import InferVStreams  # type: ignore[import]
 
-    global _hailo_output_logged
+    global _hailo_output_logged, _inference_count
+    _inference_count += 1
     m = _hailo_infer_model
     img_array = _decode_image(image_bytes)
+
+    # Periodic input diagnostics (every 100th inference)
+    if _inference_count <= 3 or _inference_count % 100 == 0:
+        log.info("DIAG input: shape=%s dtype=%s range=[%.3f, %.3f] mean=%.3f normalize=%s",
+                 img_array.shape, img_array.dtype,
+                 float(img_array.min()), float(img_array.max()),
+                 float(img_array.mean()), NORMALIZE_INPUT)
+
     input_data = {
         m["hef"].get_input_vstream_infos()[0].name: img_array[np.newaxis]
     }
@@ -593,8 +607,10 @@ def _decode_image(image_bytes: bytes) -> np.ndarray:
     from PIL import Image  # type: ignore[import]
 
     img = Image.open(io.BytesIO(image_bytes)).convert("RGB").resize((INPUT_SIZE, INPUT_SIZE))
-    # Hailo HEF includes internal normalization — pass [0, 255] float32 as-is
-    return np.asarray(img, dtype=np.float32)
+    arr = np.asarray(img, dtype=np.float32)
+    if NORMALIZE_INPUT:
+        arr = arr / 255.0
+    return arr
 
 
 def _sigmoid(x: Any) -> Any:

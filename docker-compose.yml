@@ -87,6 +87,7 @@ services:
       - PYTHONUNBUFFERED=1
 
     volumes:
+      - ./src:/app/src:ro
       - ./models:/app/models:ro
       - /usr/lib/python3/dist-packages/hailo_platform:/app/hailo_platform:ro
       - /usr/lib/libhailort.so.4.20.0:/usr/lib/libhailort.so.4.20.0:ro
