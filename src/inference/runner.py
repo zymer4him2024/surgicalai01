@@ -279,6 +279,19 @@ def _generate_yolov8_anchors(input_size: int) -> np.ndarray:
     return np.concatenate(all_points, axis=0)  # (N, 3) — cx, cy, stride
 
 
+# Pre-computed anchor cache
+_anchor_cache: np.ndarray | None = None
+
+def _get_cached_anchors() -> np.ndarray:
+    global _anchor_cache
+    if _anchor_cache is None:
+        _anchor_cache = _generate_yolov8_anchors(INPUT_SIZE)
+    return _anchor_cache
+
+
+# Pre-computed DFL weight vector
+_DFL_WEIGHTS = np.arange(16, dtype=np.float32)
+
 def _dfl_decode(dfl_tensor: np.ndarray, reg_max: int = 16) -> np.ndarray:
     """Decode DFL (Distribution Focal Loss) regression to box offsets.
 
@@ -289,9 +302,7 @@ def _dfl_decode(dfl_tensor: np.ndarray, reg_max: int = 16) -> np.ndarray:
     # softmax over reg_max dimension
     dfl_exp = np.exp(dfl - dfl.max(axis=-1, keepdims=True))
     dfl_softmax = dfl_exp / dfl_exp.sum(axis=-1, keepdims=True)
-    # weighted sum: expected value of distribution
-    arange = np.arange(reg_max, dtype=np.float32)
-    return (dfl_softmax * arange).sum(axis=-1)  # (N, 4)
+    return (dfl_softmax * _DFL_WEIGHTS).sum(axis=-1)  # (N, 4)
 
 
 def _decode_yolov8_decoupled(
@@ -331,8 +342,8 @@ def _decode_yolov8_decoupled(
     # Decode DFL to box offsets (left, top, right, bottom)
     offsets = _dfl_decode(dfl_tensor, reg_max=16)  # (N, 4)
 
-    # Generate anchor points
-    anchors = _generate_yolov8_anchors(INPUT_SIZE)  # (N, 3) — cx, cy, stride
+    # Generate anchor points (cached — INPUT_SIZE never changes at runtime)
+    anchors = _get_cached_anchors()
     if anchors.shape[0] != n_anchors:
         log.warning(
             "Anchor count mismatch: generated=%d, model=%d",
@@ -350,32 +361,33 @@ def _decode_yolov8_decoupled(
     x2 = cx + offsets[:, 2] * stride
     y2 = cy + offsets[:, 3] * stride
 
-    # Get best class per anchor
+    # Get best class per anchor — fully vectorized filtering
     class_ids = np.argmax(cls_tensor, axis=-1)
     class_scores = cls_tensor[np.arange(n_anchors), class_ids]
 
-    raw_dets = []
-    for i in range(n_anchors):
-        score = float(class_scores[i])
-        if score < CONF_THRESHOLD:
-            continue
-        cid = int(class_ids[i])
-        if SKIP_BACKGROUND and cid == 0:
-            continue
-        if cid >= num_classes:
-            continue
-        bx1, by1, bx2, by2 = float(x1[i]), float(y1[i]), float(x2[i]), float(y2[i])
-        bw, bh = bx2 - bx1, by2 - by1
-        if bw < 10 or bh < 10:
-            continue
-        if bw > INPUT_SIZE * 0.9 or bh > INPUT_SIZE * 0.9:
-            continue
-        raw_dets.append({
-            "class_id": cid,
-            "class_name": DEFAULT_CLASS_NAMES[cid],
-            "confidence": round(score, 3),
-            "bbox": [round(bx1, 2), round(by1, 2), round(bx2, 2), round(by2, 2)],
-        })
+    # Vectorized boolean mask — no Python loop over 3549 anchors
+    bw = x2 - x1
+    bh = y2 - y1
+    mask = class_scores >= CONF_THRESHOLD
+    if SKIP_BACKGROUND:
+        mask &= class_ids != 0
+    mask &= class_ids < num_classes
+    mask &= bw >= 10
+    mask &= bh >= 10
+    mask &= bw <= INPUT_SIZE * 0.9
+    mask &= bh <= INPUT_SIZE * 0.9
+
+    idx = np.where(mask)[0]
+    raw_dets = [
+        {
+            "class_id": int(class_ids[i]),
+            "class_name": DEFAULT_CLASS_NAMES[int(class_ids[i])],
+            "confidence": round(float(class_scores[i]), 3),
+            "bbox": [round(float(x1[i]), 2), round(float(y1[i]), 2),
+                     round(float(x2[i]), 2), round(float(y2[i]), 2)],
+        }
+        for i in idx
+    ]
 
     return _nms(raw_dets, max_det=15)
 
