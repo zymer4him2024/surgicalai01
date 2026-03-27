@@ -12,7 +12,7 @@ services:
       antigravity_bridge:
         ipv4_address: 172.20.0.10
       isolated_ai_bridge:
-        ipv4_address: 172.20.1.10
+        ipv4_address: 172.22.0.10
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
       interval: 30s
@@ -76,6 +76,11 @@ services:
       - MODULE_NAME=InferenceAgent
       - HAILO_DEVICE=/dev/hailo0
       - HEF_PATH=/app/models/yolov8m.hef
+      # - LABELS_PATH=/app/models/labels.json
+      # - INPUT_SIZE=416
+      # - CONF_THRESHOLD=0.35
+      # - IOU_THRESHOLD=0.45
+      # - SKIP_BACKGROUND=true
       - TEMP_WARNING_CELSIUS=85.0
       - TEMP_CRITICAL_CELSIUS=95.0
       - INFERENCE_TIMEOUT_SEC=10
@@ -227,7 +232,7 @@ services:
   #     - "8006"
   #   networks:
   #     isolated_ai_bridge:
-  #       ipv4_address: 172.20.1.16
+  #       ipv4_address: 172.22.0.16
   #   environment:
   #     - MODEL_PATH=/models/vendor.model
   # ─────────────────────────────────────────────────────────────────────────────
@@ -237,7 +242,7 @@ networks:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.20.0.0/16
+        - subnet: 172.20.0.0/24
 
   # Air-gapped network for 3rd party AI containers.
   # internal: true removes the default gateway — no outbound internet access.
@@ -249,4 +254,4 @@ networks:
     internal: true
     ipam:
       config:
-        - subnet: 172.20.1.0/24
+        - subnet: 172.22.0.0/24
