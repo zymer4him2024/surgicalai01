@@ -271,8 +271,11 @@ def _decode_yolov8_decoupled(
     # Apply sigmoid if values are outside [0, 1] (raw logits from HEF)
     cls_max = float(cls_tensor.max())
     cls_min = float(cls_tensor.min())
+    log.info("DIAG cls_tensor raw range: min=%.4f max=%.4f shape=%s", cls_min, cls_max, cls_tensor.shape)
     if cls_max > 1.0 or cls_min < 0.0:
+        log.info("DIAG applying sigmoid to cls_tensor")
         cls_tensor = 1.0 / (1.0 + np.exp(-np.clip(cls_tensor, -50, 50)))
+        log.info("DIAG cls_tensor post-sigmoid: min=%.4f max=%.4f", float(cls_tensor.min()), float(cls_tensor.max()))
 
     # Find the DFL tensor (64 = 4 * 16) and raw regression tensor
     dfl_tensor = None
@@ -315,21 +318,38 @@ def _decode_yolov8_decoupled(
     class_ids = np.argmax(cls_tensor, axis=-1)
     class_scores = cls_tensor[np.arange(n_anchors), class_ids]
 
+    # Diagnostic: log score distribution
+    top_scores = np.sort(class_scores)[::-1][:10]
+    top_ids = np.argsort(class_scores)[::-1][:10]
+    log.info("DIAG top10 scores: %s", [round(float(s), 4) for s in top_scores])
+    log.info("DIAG top10 class_ids: %s", [int(class_ids[i]) for i in top_ids])
+    log.info("DIAG sample bbox x1=%.1f y1=%.1f x2=%.1f y2=%.1f (anchor0)",
+             float(x1[0]), float(y1[0]), float(x2[0]), float(y2[0]))
+
+    n_above_thresh = 0
+    n_background = 0
+    n_small = 0
+    n_big = 0
+
     raw_dets = []
     for i in range(n_anchors):
         score = float(class_scores[i])
         if score < CONF_THRESHOLD:
             continue
+        n_above_thresh += 1
         cid = int(class_ids[i])
         if SKIP_BACKGROUND and cid == 0:
+            n_background += 1
             continue
         if cid >= num_classes:
             continue
         bx1, by1, bx2, by2 = float(x1[i]), float(y1[i]), float(x2[i]), float(y2[i])
         bw, bh = bx2 - bx1, by2 - by1
         if bw < 10 or bh < 10:
+            n_small += 1
             continue
         if bw > INPUT_SIZE * 0.9 or bh > INPUT_SIZE * 0.9:
+            n_big += 1
             continue
         raw_dets.append({
             "class_id": cid,
@@ -338,6 +358,8 @@ def _decode_yolov8_decoupled(
             "bbox": [round(bx1, 2), round(by1, 2), round(bx2, 2), round(by2, 2)],
         })
 
+    log.info("DIAG filter: above_thresh=%d bg=%d small=%d big=%d final=%d",
+             n_above_thresh, n_background, n_small, n_big, len(raw_dets))
     return _nms(raw_dets, max_det=15)
 
 
