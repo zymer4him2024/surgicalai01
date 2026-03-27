@@ -668,10 +668,8 @@ function renderApplications() {
         });
     });
     applicationsTableBody.querySelectorAll('.delete-application-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
-            if (!confirm(`Delete application "${btn.dataset.name}"?`)) return;
-            try { await deleteDoc(doc(db, 'applications', btn.dataset.id)); }
-            catch (err) { alert('Failed to delete: ' + err.message); }
+        btn.addEventListener('click', () => {
+            alert(`Application "${btn.dataset.name}" cannot be deleted.\n\nApplications may be linked to active projects. Unlink from the project first, then archive if no longer needed.`);
         });
     });
 }
@@ -923,10 +921,8 @@ function renderModels() {
         });
     });
     modelsTableBody.querySelectorAll('.delete-model-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
-            if (!confirm(`Delete model "${btn.dataset.name}"?`)) return;
-            try { await deleteDoc(doc(db, 'models', btn.dataset.id)); }
-            catch (err) { alert('Failed to delete: ' + err.message); }
+        btn.addEventListener('click', () => {
+            alert(`Model "${btn.dataset.name}" cannot be deleted.\n\nModels may be referenced by active projects. Remove the model from all projects first.`);
         });
     });
 }
@@ -1315,13 +1311,19 @@ function updateProjectSelects(project = null) {
         customerSel.value = project?.customer_id || '';
     }
 
-    // Devices (multi-select)
+    // Device (single-select, 1:1 binding)
     const deviceSel = document.getElementById('project-device-ids');
     if (deviceSel) {
         const selectedIds = Array.isArray(project?.device_ids) ? project.device_ids : [];
-        deviceSel.innerHTML = devicesData.map(d =>
-            `<option value="${d.id}" ${selectedIds.includes(d.id) ? 'selected' : ''}>${d.name || d.device_id || d.id}</option>`
-        ).join('');
+        const currentProjectId = project?.id || editingProjectId;
+        deviceSel.innerHTML = '<option value="">None</option>' + devicesData.map(d => {
+            const isSelected = selectedIds.includes(d.id);
+            const ownerProject = projectsData.find(p => p.id !== currentProjectId && (p.device_ids || []).includes(d.id));
+            const inUse = !isSelected && ownerProject;
+            const label = d.name || d.device_id || d.id;
+            const suffix = inUse ? ` (In use by: ${ownerProject.name || ownerProject.id})` : '';
+            return `<option value="${d.id}" ${isSelected ? 'selected' : ''} ${inUse ? 'disabled' : ''}>${label}${suffix}</option>`;
+        }).join('');
     }
 
     // AI Model
@@ -1355,9 +1357,7 @@ if (addProjectForm) addProjectForm.addEventListener('submit', async e => {
     btn.disabled = true;
     btn.textContent = 'Saving…';
     const deviceSel = document.getElementById('project-device-ids');
-    const selectedDeviceIds = deviceSel
-        ? Array.from(deviceSel.selectedOptions).map(o => o.value).filter(Boolean)
-        : [];
+    const selectedDeviceIds = deviceSel && deviceSel.value ? [deviceSel.value] : [];
     const fields = {
         name: document.getElementById('project-name').value.trim(),
         description: document.getElementById('project-description').value.trim(),
@@ -1571,15 +1571,8 @@ function renderCustomers() {
         });
     });
     customersTableBody.querySelectorAll('.delete-customer-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
-            const name = btn.dataset.name;
-            if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
-            try {
-                await deleteDoc(doc(db, 'customers', btn.dataset.id));
-            } catch (err) {
-                console.error('Delete customer error:', err);
-                alert('Failed to delete: ' + err.message);
-            }
+        btn.addEventListener('click', () => {
+            alert(`Customer "${btn.dataset.name}" cannot be deleted.\n\nCustomers may be linked to active projects. Remove the customer from all projects first.`);
         });
     });
     customersTableBody.querySelectorAll('.edit-customer-btn').forEach(btn => {
@@ -1658,10 +1651,8 @@ function renderDevices(devicesData) {
         });
     });
     devicesTableBody.querySelectorAll('.delete-device-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
-            if (!confirm(`Delete device "${btn.dataset.name}"?`)) return;
-            try { await deleteDoc(doc(db, 'devices', btn.dataset.id)); }
-            catch (err) { alert('Failed to delete: ' + err.message); }
+        btn.addEventListener('click', () => {
+            alert(`Device "${btn.dataset.name}" cannot be deleted.\n\nDevices may be assigned to active projects. Unassign from the project first, then decommission.`);
         });
     });
 }
