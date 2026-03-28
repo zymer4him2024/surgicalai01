@@ -23,6 +23,7 @@ Usage:
 from __future__ import annotations
 
 import time
+from collections import deque
 from dataclasses import dataclass, field
 
 
@@ -134,6 +135,7 @@ class SurgicalTracker:
         min_hits: int = 3,
         iou_threshold: float = 0.3,
         ema_alpha: float = 0.6,
+        count_window: int = 10,
     ) -> None:
         self.max_age = max_age
         self.min_hits = min_hits
@@ -141,6 +143,7 @@ class SurgicalTracker:
         self.ema_alpha = ema_alpha
         self._next_id = 1
         self.tracks: list[Track] = []
+        self._count_history: deque[tuple[str, ...]] = deque(maxlen=count_window)
 
     def update(self, detections: list[dict]) -> list[dict]:
         """
@@ -200,18 +203,17 @@ class SurgicalTracker:
         return results
 
     def get_counts(self) -> dict[str, int]:
-        """Count unique confirmed active tracks. Excludes Background class.
+        """Count unique confirmed active tracks with temporal smoothing.
 
-        Deduplicates same-class tracks that overlap > 40% IoU (safety net
-        against tracker creating duplicate tracks for the same physical object).
+        1. Deduplicates overlapping tracks (same-class >30% IoU, any-class >60% IoU)
+        2. Records per-class counts into a sliding window (last N frames)
+        3. Returns the mode (most frequent) count per class — suppresses transient spikes
         """
         active = [
             t for t in self.tracks
             if t.is_confirmed and t.age <= self.max_age and t.class_name != "Background"
         ]
-        # Deduplicate overlapping tracks (keep higher total_hits):
-        # - Same class, >30% IoU = duplicate of same object
-        # - Any class, >60% IoU = same physical object with class flip-flop
+        # Deduplicate overlapping tracks (keep higher total_hits)
         active.sort(key=lambda t: t.total_hits, reverse=True)
         kept: list[Track] = []
         for t in active:
@@ -223,10 +225,27 @@ class SurgicalTracker:
                     break
             if not is_dup:
                 kept.append(t)
-        counts: dict[str, int] = {}
+
+        # Raw counts this frame
+        raw: dict[str, int] = {}
         for t in kept:
-            counts[t.class_name] = counts.get(t.class_name, 0) + 1
-        return counts
+            raw[t.class_name] = raw.get(t.class_name, 0) + 1
+
+        # Record raw counts into sliding window
+        self._count_history.append(dict(raw))
+
+        # Temporal smoothing: mode (most frequent) count per class over window
+        all_classes: set[str] = set()
+        for snap in self._count_history:
+            all_classes.update(snap.keys())
+
+        smoothed: dict[str, int] = {}
+        for cls in all_classes:
+            values = [snap.get(cls, 0) for snap in self._count_history]
+            mode_val = max(set(values), key=values.count)
+            if mode_val > 0:
+                smoothed[cls] = mode_val
+        return smoothed
 
     def get_active_track_count(self) -> int:
         return sum(1 for t in self.tracks if t.is_confirmed and t.age <= self.max_age)
@@ -234,3 +253,4 @@ class SurgicalTracker:
     def reset(self) -> None:
         self.tracks.clear()
         self._next_id = 1
+        self._count_history.clear()
