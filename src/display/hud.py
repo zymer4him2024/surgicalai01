@@ -67,8 +67,7 @@ class HUDRenderer:
     def __init__(self) -> None:
         self._last_frame_id: int = -1
         self._cached_resized: np.ndarray | None = None
-        self._last_tray_items: list = []  # persist tray data between updates
-        self._last_job_id: str | None = None  # clear cache on job change
+        self._last_tray_items: list = []  # persist tray data until new inference replaces it
 
     def render(self, canvas: np.ndarray, snap: _StateSnapshot) -> None:
         h, w = canvas.shape[:2]
@@ -98,11 +97,7 @@ class HUDRenderer:
         self._draw_ai_panel(canvas, snap, x=16, y=16)
         self._draw_network_panel(canvas, snap, x=w - 260, y=16)
 
-        # Clear tray cache when job changes; persist within same job
-        current_job_id = snap.scan_info.job_id if snap.scan_info else None
-        if current_job_id != self._last_job_id:
-            self._last_tray_items = []
-            self._last_job_id = current_job_id
+        # Persist tray data until new inference arrives — only replace on non-empty update
         if snap.tray_items:
             self._last_tray_items = snap.tray_items
         display_tray_items = self._last_tray_items
@@ -115,7 +110,10 @@ class HUDRenderer:
 
         # DATA INFO: same width as TRAY, 50% taller vertically, above TRAY
         if snap.scan_info is not None:
-            n_targets = sum(1 for v in snap.scan_info.target.values() if v > 0)
+            if "total" in snap.scan_info.target:
+                n_targets = 1
+            else:
+                n_targets = sum(1 for v in snap.scan_info.target.values() if v > 0)
             data_ph = 114 + max(1, n_targets) * 39
             data_y = tray_y - data_ph - 10
             self._draw_data_panel(canvas, snap, x=16, y=data_y)
@@ -246,10 +244,16 @@ class HUDRenderer:
         if snap.scan_info is None:
             return
         si = snap.scan_info
-        targets = [(k, v) for k, v in si.target.items() if v > 0]
+        is_total_mode = "total" in si.target
         ROW_H = 39
         pw = 310
-        ph = 114 + max(1, len(targets)) * ROW_H
+
+        if is_total_mode:
+            # Total-count mode: compact panel showing just target count
+            ph = 114 + ROW_H
+        else:
+            targets = [(k, v) for k, v in si.target.items() if v > 0]
+            ph = 114 + max(1, len(targets)) * ROW_H
 
         ch = canvas.shape[0]
         y = max(16, min(y, ch - ph - 8))
@@ -266,17 +270,25 @@ class HUDRenderer:
                     FONT_SMALL, 0.46, C_GRAY, 1, cv2.LINE_AA)
 
         start_y = y + 88
-        if not targets:
-            cv2.putText(canvas, "No targets", (x + 12, start_y + ROW_H),
-                        FONT_SMALL, 0.52, C_GRAY, 1, cv2.LINE_AA)
+        if is_total_mode:
+            total_cnt = si.target["total"]
+            ry = start_y + ROW_H
+            cv2.putText(canvas, "Target Objects", (x + 12, ry),
+                        FONT_SMALL, 0.52, C_WHITE, 1, cv2.LINE_AA)
+            cv2.putText(canvas, f"x {total_cnt}", (x + 262, ry),
+                        FONT_SMALL, 0.56, C_WARN, 1, cv2.LINE_AA)
         else:
-            for i, (cls, cnt) in enumerate(targets):
-                ry = start_y + (i + 1) * ROW_H
-                cls_disp = cls if len(cls) <= 20 else cls[:17] + "..."
-                cv2.putText(canvas, cls_disp, (x + 12, ry),
-                            FONT_SMALL, 0.52, C_WHITE, 1, cv2.LINE_AA)
-                cv2.putText(canvas, f"x {cnt}", (x + 262, ry),
-                            FONT_SMALL, 0.56, C_WARN, 1, cv2.LINE_AA)
+            if not targets:
+                cv2.putText(canvas, "No targets", (x + 12, start_y + ROW_H),
+                            FONT_SMALL, 0.52, C_GRAY, 1, cv2.LINE_AA)
+            else:
+                for i, (cls, cnt) in enumerate(targets):
+                    ry = start_y + (i + 1) * ROW_H
+                    cls_disp = cls if len(cls) <= 20 else cls[:17] + "..."
+                    cv2.putText(canvas, cls_disp, (x + 12, ry),
+                                FONT_SMALL, 0.52, C_WHITE, 1, cv2.LINE_AA)
+                    cv2.putText(canvas, f"x {cnt}", (x + 262, ry),
+                                FONT_SMALL, 0.56, C_WARN, 1, cv2.LINE_AA)
 
     # ── TRAY INFO panel (bottom-left, responsive) ────────────────────────────
 
