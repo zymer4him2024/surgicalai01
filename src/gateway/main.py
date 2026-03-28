@@ -435,6 +435,7 @@ async def _counting_loop() -> None:
     _fps_counter = 0
     _fps_start = time.monotonic()
     _last_pushed_preset: dict | None = None  # track last scan_info pushed to display
+    _idle_hud_tick: int = 0  # re-send scan_info every N idle cycles
 
     while True:
         if not camera_active:
@@ -443,11 +444,12 @@ async def _counting_loop() -> None:
 
         if not inference_running or not current_job:
             # Keep DATA INFO panel populated while waiting for QR scan.
-            # Use await (not create_task) so no lingering tasks overwrite the
-            # QR scan loop's scanned_at update after activation.
+            # Re-send every 10 idle cycles (~5s) so display recovers after restart.
             if _pending_preset and _pending_preset.get("scan_info"):
-                if _pending_preset is not _last_pushed_preset:
+                _idle_hud_tick += 1
+                if _pending_preset is not _last_pushed_preset or _idle_hud_tick >= 10:
                     _last_pushed_preset = _pending_preset
+                    _idle_hud_tick = 0
                     try:
                         await client().post(
                             f"{DISPLAY_URL}/hud",
@@ -458,6 +460,7 @@ async def _counting_loop() -> None:
                         pass
             else:
                 _last_pushed_preset = None
+                _idle_hud_tick = 0
             await asyncio.sleep(0.5)
             continue
 
@@ -535,6 +538,7 @@ async def _counting_loop() -> None:
                     last_scanned_qr = None
                     _match_achieved_at = time.monotonic()
                     asyncio.create_task(_log_inspection_round("GOOD", enriched_items))
+                    asyncio.create_task(_sync_match_event(enriched_items))
                     asyncio.create_task(client().post(
                         f"{DISPLAY_URL}/hud",
                         json={"border_color": "green", "center_text": "Good"},
@@ -801,6 +805,30 @@ async def _log_inspection_round(result: str, detected_items: list[dict]) -> None
         await client().post(f"{FIREBASE_SYNC_URL}/log_round", json=round_data, timeout=3.0)
     except Exception as exc:
         logger.debug("log_inspection_round error: %s", exc)
+
+
+async def _sync_match_event(detected_items: list[dict]) -> None:
+    """Write a match (success) event to sync_events so the dashboard can track it."""
+    if not current_job:
+        return
+    try:
+        target = current_job.get("target", {})
+        detected = {d["class_name"]: d["count"] for d in detected_items if "class_name" in d}
+        payload = {
+            "event_type": "match",
+            "expected_count": sum(target.values()),
+            "actual_count": sum(detected.values()),
+            "missing_items": [],
+            "detected_items": detected_items,
+            "metadata": {
+                "job_id": current_job.get("id", ""),
+                "target": target,
+                "detected": detected,
+            },
+        }
+        await client().post(f"{FIREBASE_SYNC_URL}/sync", json=payload, timeout=3.0)
+    except Exception as exc:
+        logger.debug("sync match event error: %s", exc)
 
 
 async def _trigger_snapshot(devices_resolved: list[dict] | None = None):

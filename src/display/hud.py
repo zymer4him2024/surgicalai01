@@ -67,6 +67,7 @@ class HUDRenderer:
     def __init__(self) -> None:
         self._last_frame_id: int = -1
         self._cached_resized: np.ndarray | None = None
+        self._last_tray_items: list = []  # persist tray data between updates
 
     def render(self, canvas: np.ndarray, snap: _StateSnapshot) -> None:
         h, w = canvas.shape[:2]
@@ -95,14 +96,27 @@ class HUDRenderer:
         # 3) HUD panels
         self._draw_ai_panel(canvas, snap, x=16, y=16)
         self._draw_network_panel(canvas, snap, x=w - 260, y=16)
-        ROW_H = 26
+
+        # Persist tray items: keep previous data until new non-empty data arrives
+        if snap.tray_items:
+            self._last_tray_items = snap.tray_items
+        display_tray_items = self._last_tray_items
+
+        # TRAY INFO: responsive height, anchored from bottom
+        tray_row_h = 28
+        n_tray = len(display_tray_items) if display_tray_items else 1
+        tray_ph = 52 + n_tray * tray_row_h + 34
+        tray_y = h - tray_ph - 16
+
+        # DATA INFO: 50% larger, positioned above TRAY INFO
+        DATA_ROW_H = 34
         if snap.scan_info is not None:
             n_targets = sum(1 for v in snap.scan_info.target.values() if v > 0)
-            data_ph = 62 + max(1, n_targets) * ROW_H
-        else:
-            data_ph = 0
-        self._draw_data_panel(canvas, snap, x=16, y=h - 200 - data_ph - 8)
-        self._draw_tray_panel(canvas, snap, x=16, y=h - 200)
+            data_ph = 100 + max(1, n_targets) * DATA_ROW_H
+            data_y = tray_y - data_ph - 10
+            self._draw_data_panel(canvas, snap, x=16, y=data_y)
+
+        self._draw_tray_panel_impl(canvas, display_tray_items, x=16, y=tray_y)
 
         # 4) Match status text (top center)
         self._draw_status_text(canvas, snap)
@@ -229,49 +243,49 @@ class HUDRenderer:
             return
         si = snap.scan_info
         targets = [(k, v) for k, v in si.target.items() if v > 0]
-        ROW_H = 26
-        pw = 310
-        ph = 76 + max(1, len(targets)) * ROW_H
+        ROW_H = 34
+        pw = 420
+        ph = 100 + max(1, len(targets)) * ROW_H
 
         ch = canvas.shape[0]
-        y = min(y, ch - ph - 8)
+        y = max(16, min(y, ch - ph - 8))
 
         self._panel_bg(canvas, x, y, pw, ph)
-        self._header(canvas, "[+] DATA INFO", x + 10, y + 22)
+        self._header(canvas, "[+] DATA INFO", x + 12, y + 26)
 
-        job_display = si.job_id if len(si.job_id) <= 26 else si.job_id[:23] + "..."
-        cv2.putText(canvas, f"Job:  {job_display}", (x + 12, y + 46),
-                    FONT_SMALL, 0.44, C_WHITE, 1, cv2.LINE_AA)
+        job_display = si.job_id if len(si.job_id) <= 30 else si.job_id[:27] + "..."
+        cv2.putText(canvas, f"Job:  {job_display}", (x + 14, y + 54),
+                    FONT_SMALL, 0.56, C_WHITE, 1, cv2.LINE_AA)
 
         scan_str = si.scanned_at if si.scanned_at else "waiting..."
-        cv2.putText(canvas, f"Scan: {scan_str}", (x + 12, y + 70),
-                    FONT_SMALL, 0.40, C_GRAY, 1, cv2.LINE_AA)
+        cv2.putText(canvas, f"Scan: {scan_str}", (x + 14, y + 82),
+                    FONT_SMALL, 0.50, C_GRAY, 1, cv2.LINE_AA)
 
-        start_y = y + 70
+        start_y = y + 82
         if not targets:
-            cv2.putText(canvas, "No targets", (x + 12, start_y + ROW_H),
-                        FONT_SMALL, 0.44, C_GRAY, 1, cv2.LINE_AA)
+            cv2.putText(canvas, "No targets", (x + 14, start_y + ROW_H),
+                        FONT_SMALL, 0.56, C_GRAY, 1, cv2.LINE_AA)
         else:
             for i, (cls, cnt) in enumerate(targets):
                 ry = start_y + (i + 1) * ROW_H
-                cls_disp = cls if len(cls) <= 20 else cls[:17] + "..."
-                cv2.putText(canvas, cls_disp, (x + 12, ry),
-                            FONT_SMALL, 0.44, C_WHITE, 1, cv2.LINE_AA)
-                cv2.putText(canvas, f"x {cnt}", (x + 262, ry),
-                            FONT_SMALL, 0.48, C_WARN, 1, cv2.LINE_AA)
+                cls_disp = cls if len(cls) <= 24 else cls[:21] + "..."
+                cv2.putText(canvas, cls_disp, (x + 14, ry),
+                            FONT_SMALL, 0.56, C_WHITE, 1, cv2.LINE_AA)
+                cv2.putText(canvas, f"x {cnt}", (x + 360, ry),
+                            FONT_SMALL, 0.60, C_WARN, 1, cv2.LINE_AA)
 
-    # ── TRAY INFO panel (bottom-left) ────────────────────────────────────────
+    # ── TRAY INFO panel (bottom-left, responsive) ────────────────────────────
 
-    def _draw_tray_panel(
-        self, canvas: np.ndarray, snap: _StateSnapshot, x: int, y: int
+    def _draw_tray_panel_impl(
+        self, canvas: np.ndarray, items: list, x: int, y: int
     ) -> None:
-        items = snap.tray_items
         row_h = 28
-        ph = 52 + len(items) * row_h + 34
+        n_items = len(items) if items else 1
+        ph = 52 + n_items * row_h + 34
         pw = 310
 
-        h = canvas.shape[0]
-        y = min(y, h - ph - 8)
+        ch = canvas.shape[0]
+        y = max(16, min(y, ch - ph - 8))
 
         self._panel_bg(canvas, x, y, pw, ph)
         self._header(canvas, "[+] TRAY INFO", x + 10, y + 22)
