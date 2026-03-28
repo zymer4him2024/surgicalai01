@@ -200,16 +200,29 @@ class SurgicalTracker:
         return results
 
     def get_counts(self) -> dict[str, int]:
-        """Count unique confirmed active tracks. Excludes Background class."""
+        """Count unique confirmed active tracks. Excludes Background class.
+
+        Deduplicates same-class tracks that overlap > 40% IoU (safety net
+        against tracker creating duplicate tracks for the same physical object).
+        """
+        active = [
+            t for t in self.tracks
+            if t.is_confirmed and t.age <= self.max_age and t.class_name != "Background"
+        ]
+        # Deduplicate: suppress same-class tracks with high IoU (keep higher total_hits)
+        active.sort(key=lambda t: t.total_hits, reverse=True)
+        kept: list[Track] = []
+        for t in active:
+            is_dup = False
+            for k in kept:
+                if t.class_name == k.class_name and _iou(t.bbox, k.bbox) > 0.4:
+                    is_dup = True
+                    break
+            if not is_dup:
+                kept.append(t)
         counts: dict[str, int] = {}
-        for track in self.tracks:
-            if not track.is_confirmed:
-                continue
-            if track.age > self.max_age:
-                continue
-            if track.class_name == "Background":
-                continue
-            counts[track.class_name] = counts.get(track.class_name, 0) + 1
+        for t in kept:
+            counts[t.class_name] = counts.get(t.class_name, 0) + 1
         return counts
 
     def get_active_track_count(self) -> int:
