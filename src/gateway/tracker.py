@@ -192,9 +192,12 @@ class SurgicalTracker:
 
         self.tracks = [t for t in self.tracks if t.age <= self.max_age]
 
+        # Return all confirmed active tracks (age <= max_age), not just matched-this-frame (age == 0).
+        # get_counts() also uses age <= max_age, so bbox display stays consistent with the count.
+        # Without this, a track that misses one frame has no bbox but still appears in the count.
         results = []
         for track in self.tracks:
-            if track.is_confirmed and track.age == 0:
+            if track.is_confirmed(self.min_hits) and track.age <= self.max_age:
                 results.append({
                     "track_id": track.track_id,
                     "class_id": 0,
