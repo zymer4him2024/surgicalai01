@@ -61,10 +61,11 @@ class Track:
     first_seen: float = field(default_factory=time.monotonic)
     last_seen: float = field(default_factory=time.monotonic)
     class_history: list = field(default_factory=list)  # rolling class votes
+    min_hits: int = 3       # confirmation threshold — set from SurgicalTracker.min_hits at creation
 
     @property
     def is_confirmed(self) -> bool:
-        return self.total_hits >= 2
+        return self.total_hits >= self.min_hits
 
     def predict(self) -> list[float]:
         return self.bbox.copy()
@@ -184,6 +185,7 @@ class SurgicalTracker:
                     class_name=det.get("class_name", "unknown"),
                     bbox=det["bbox"].copy(),
                     confidence=det["confidence"],
+                    min_hits=self.min_hits,
                 )
                 self.tracks.append(new_track)
                 self._next_id += 1

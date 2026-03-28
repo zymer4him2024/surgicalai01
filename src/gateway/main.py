@@ -99,8 +99,8 @@ _pending_preset: dict | None = None
 _latest_tracked_dets: list[dict] = []
 
 _tracker = SurgicalTracker(
-    max_age=15,        # longer persistence between inference frames
-    min_hits=2,        # faster confirmation
+    max_age=5,         # expire dead tracks quickly (instruments are stationary; 5 frames ≈ 1-2s)
+    min_hits=3,        # require 3 consecutive matches before counting (filters transient noise)
     iou_threshold=0.3, # match threshold for track-detection association
     ema_alpha=0.25,    # low alpha = heavy smoothing (instruments are stationary)
 )
@@ -366,6 +366,11 @@ async def _qr_scan_loop() -> None:
             last_scanned_qr = qr_data
             last_trigger_time = now
 
+            # Never interrupt an active counting job — only activate if idle
+            if current_job is not None:
+                logger.debug("QR ignored — job %r already active", current_job.get("id"))
+                continue
+
             if _pending_preset is None:
                 # Trigger Firebase load in background (non-blocking)
                 asyncio.create_task(
@@ -388,6 +393,7 @@ async def _qr_scan_loop() -> None:
                 current_job = job
                 current_state = SystemState.READY
                 mismatch_start_time = None
+                _tracker.reset()
                 logger.info("QR detected → detection started: id=%r target=%s", job["id"], job["target"])
 
             await client().post(
@@ -515,17 +521,22 @@ async def _counting_loop() -> None:
             raw_dets = data.get("detections", [])
 
             tracked_dets = _tracker.update(raw_dets)
-            if not tracked_dets and raw_dets:
-                tracked_dets = _smooth_detections(raw_dets, _tracked_detections)
             _tracked_detections = tracked_dets
 
             actual_counts = _tracker.get_counts()
 
             target_counts = current_job.get("target", {})
-            is_match = bool(target_counts) and all(
-                abs(actual_counts.get(key, 0) - expected) <= MATCH_TOLERANCE
-                for key, expected in target_counts.items()
-            )
+            # Total-count mode: target has "total" key → match on sum of all detected objects
+            if "total" in target_counts:
+                total_expected = target_counts["total"]
+                total_actual = sum(actual_counts.values())
+                is_match = abs(total_actual - total_expected) <= MATCH_TOLERANCE
+            else:
+                # Per-class mode (legacy)
+                is_match = bool(target_counts) and all(
+                    abs(actual_counts.get(key, 0) - expected) <= MATCH_TOLERANCE
+                    for key, expected in target_counts.items()
+                )
 
             enriched_items = await _enrich_with_device_info(actual_counts)
             global latest_detections
