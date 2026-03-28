@@ -587,8 +587,7 @@ async def _counting_loop() -> None:
                         ))
                     elif _error_achieved_at and time.monotonic() - _error_achieved_at >= HOLD_SEC:
                         logger.info("NO MATCH held %.0fs — re-arming same tray for re-scan", HOLD_SEC)
-                        # Re-arm same preset so QR scan retries the same tray
-                        _pending_preset = {
+                        rearm_job = {
                             "id": current_job["id"],
                             "target": current_job["target"],
                             "scan_info": {
@@ -597,6 +596,17 @@ async def _counting_loop() -> None:
                                 "target": current_job["target"],
                             },
                         }
+                        # Total-count mode: reactivate immediately — no QR scan needed to retry
+                        if "total" in current_job.get("target", {}):
+                            current_job = rearm_job
+                            current_state = SystemState.READY
+                            mismatch_start_time = None
+                            _error_achieved_at = None
+                            _tracker.reset()
+                            logger.info("Total-count mode — auto-reactivated job %r", rearm_job["id"])
+                            continue
+                        # Per-class mode: re-arm and wait for QR scan
+                        _pending_preset = rearm_job
                         current_job = None
                         current_state = SystemState.READY
                         mismatch_start_time = None
