@@ -411,7 +411,7 @@ def _decode_yolov8_decoupled(
         for i in idx
     ]
 
-    return _nms(raw_dets, max_det=15)
+    return _nms(raw_dets, max_det=30)
 
 
 def _run_hailo_inference(image_bytes: bytes, log: logging.Logger) -> list[dict]:
@@ -793,16 +793,17 @@ def _nms(detections: list[dict], max_det: int = 15) -> list[dict]:
                 break
         if not is_dup:
             stage1.append(det)
-    # Stage 2: cross-class NMS for near-identical boxes (same physical object, different class)
-    # Threshold is lower than stage 1 (0.55 vs IOU_THRESHOLD) to account for INT8 bbox variance
-    # where the same object's box can shift 10-20px between class predictions.
+    # Stage 2: cross-class NMS for near-identical boxes (same physical object, different class).
+    # INT8 flip-flop on the same object produces boxes with IoU > 0.70.
+    # Two adjacent distinct instruments on a crowded tray have IoU < 0.60.
+    # 0.70 threshold sits in the gap between these two cases.
     stage2: list[dict] = []
     for det in stage1:
         if len(stage2) >= max_det:
             break
         is_dup = False
         for k in stage2:
-            if _iou(det["bbox"], k["bbox"]) >= 0.55:
+            if _iou(det["bbox"], k["bbox"]) >= 0.70:
                 is_dup = True
                 break
         if not is_dup:

@@ -77,7 +77,7 @@ services:
       - MODULE_NAME=InferenceAgent
       - HAILO_DEVICE=/dev/hailo0
       - HEF_PATH=/app/models/surgeonet_416.hef
-      - CONF_THRESHOLD=0.25
+      - CONF_THRESHOLD=0.30
       - IOU_THRESHOLD=0.50
       - NORMALIZE_INPUT=false
       - TEMP_WARNING_CELSIUS=85.0

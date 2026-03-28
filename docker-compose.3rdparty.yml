@@ -1,0 +1,61 @@
+# docker-compose.3rdparty.yml — 3rd Party AI Override
+#
+# Switches the gateway from internal Hailo inference to mock_external_ai.
+# Proves the API Adapter Pattern (schema translation) end-to-end.
+#
+# Usage (RPi or Mac):
+#   docker compose -f docker-compose.yml -f docker-compose.3rdparty.yml up -d --build
+#   docker compose -f docker-compose.yml -f docker-compose.3rdparty.yml down
+#
+# To test with auth token:
+#   EXTERNAL_AI_TOKEN=test-token-123 docker compose -f docker-compose.yml -f docker-compose.3rdparty.yml up -d
+#
+# Verification:
+#   curl http://localhost:8000/health                              # gateway health
+#   curl http://localhost:8006/health                             # mock AI health
+#   curl http://localhost:8006/integration/validate \
+#     -H "X-App-ID: surgical" \
+#     -H "X-Device-ID: US-RPi-001" \
+#     -H "Authorization: Bearer test-token-123"                  # header check
+#   curl http://localhost:8000/status                             # full pipeline status
+
+services:
+
+  # ── Mock 3rd Party AI ─────────────────────────────────────────────────────
+  # Simulates a vendor AI container: POST /predict, 3rd-party JSON schema.
+  # Assigned to antigravity_bridge for testing (production: isolated_ai_bridge only).
+  mock_external_ai:
+    build:
+      context: .
+      dockerfile: Dockerfile.mock_external_ai
+    container_name: mock_external_ai
+    restart: unless-stopped
+    command: python -m src.mock_external_ai.main
+    expose:
+      - "8006"
+    ports:
+      - "8006:8006"
+    networks:
+      antigravity_bridge:
+        ipv4_address: 172.20.0.16
+    environment:
+      - MODULE_NAME=MockExternalAI
+    volumes:
+      - ./src:/app/src:ro
+    mem_limit: "256m"
+    cpus: "0.5"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8006/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ── Gateway override: route inference to mock_external_ai ─────────────────
+  gateway_agent:
+    depends_on:
+      mock_external_ai:
+        condition: service_healthy
+    environment:
+      - INFERENCE_URL=http://mock_external_ai:8006
+      - INFERENCE_ENDPOINT=/predict
+      - EXTERNAL_AI_TOKEN=${EXTERNAL_AI_TOKEN:-test-token-123}
