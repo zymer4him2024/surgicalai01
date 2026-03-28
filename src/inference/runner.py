@@ -81,12 +81,12 @@ INPUT_SIZE = int(os.getenv("INPUT_SIZE", "416"))
 SKIP_BACKGROUND = os.getenv("SKIP_BACKGROUND", "true").lower() == "true"
 
 # NMS parameters
-CONF_THRESHOLD = float(os.getenv("CONF_THRESHOLD", "0.35"))
-IOU_THRESHOLD = float(os.getenv("IOU_THRESHOLD", "0.45"))
+CONF_THRESHOLD = float(os.getenv("CONF_THRESHOLD", "0.25"))
+IOU_THRESHOLD = float(os.getenv("IOU_THRESHOLD", "0.65"))
 
 # Whether to normalize input to [0, 1] before passing to SDK.
-# SurgeoNet HEF does NOT include internal /255 normalization — requires pre-normalized [0,1] input.
-NORMALIZE_INPUT = os.getenv("NORMALIZE_INPUT", "true").lower() == "true"
+# With UINT8 input mode, normalization is NOT needed — SDK uses HEF's compiled scale/zero_point.
+NORMALIZE_INPUT = os.getenv("NORMALIZE_INPUT", "false").lower() == "true"
 
 # Color channel order: "bgr" or "rgb". YOLOv8 trained with OpenCV uses BGR.
 COLOR_ORDER = os.getenv("COLOR_ORDER", "bgr").lower()
@@ -209,8 +209,10 @@ def _try_load_hailo(hef_path: str, log: logging.Logger) -> bool:
         network_group = network_groups[0]
         network_group_params = network_group.create_params()
 
+        # Input: UINT8 — pass raw [0,255] pixels; SDK applies HEF's compiled quantization
+        # Output: FLOAT32 — SDK dequantizes so existing decode logic works unchanged
         input_vstreams_params = InputVStreamParams.make_from_network_group(
-            network_group, quantized=False, format_type=FormatType.FLOAT32
+            network_group, quantized=True, format_type=FormatType.UINT8
         )
         output_vstreams_params = OutputVStreamParams.make_from_network_group(
             network_group, quantized=False, format_type=FormatType.FLOAT32
@@ -361,6 +363,26 @@ def _decode_yolov8_decoupled(
     x2 = cx + offsets[:, 2] * stride
     y2 = cy + offsets[:, 3] * stride
 
+    # De-letterbox: map coordinates from letterbox space to full INPUT_SIZE space
+    _, pad_x, pad_y = _letterbox_params
+    if pad_x > 0 or pad_y > 0:
+        x1 = x1 - pad_x
+        x2 = x2 - pad_x
+        y1 = y1 - pad_y
+        y2 = y2 - pad_y
+        content_w = INPUT_SIZE - 2 * pad_x
+        content_h = INPUT_SIZE - 2 * pad_y
+        if content_w > 0:
+            x1 = x1 * INPUT_SIZE / content_w
+            x2 = x2 * INPUT_SIZE / content_w
+        if content_h > 0:
+            y1 = y1 * INPUT_SIZE / content_h
+            y2 = y2 * INPUT_SIZE / content_h
+        np.clip(x1, 0, INPUT_SIZE, out=x1)
+        np.clip(y1, 0, INPUT_SIZE, out=y1)
+        np.clip(x2, 0, INPUT_SIZE, out=x2)
+        np.clip(y2, 0, INPUT_SIZE, out=y2)
+
     # Get best class per anchor — fully vectorized filtering
     class_ids = np.argmax(cls_tensor, axis=-1)
     class_scores = cls_tensor[np.arange(n_anchors), class_ids]
@@ -372,8 +394,8 @@ def _decode_yolov8_decoupled(
     if SKIP_BACKGROUND:
         mask &= class_ids != 0
     mask &= class_ids < num_classes
-    mask &= bw >= 10
-    mask &= bh >= 10
+    mask &= bw >= 4
+    mask &= bh >= 4
     mask &= bw <= INPUT_SIZE * 0.9
     mask &= bh <= INPUT_SIZE * 0.9
 
@@ -619,14 +641,35 @@ def _cleanup_hailo() -> None:
 # Image decoding / YOLO post-processing utilities
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Letterbox state — updated per frame, read by _decode_yolov8_decoupled for de-letterboxing
+_letterbox_params: tuple[float, int, int] = (1.0, 0, 0)  # (scale, pad_x, pad_y)
+
+
+def _letterbox_resize(img: np.ndarray, target_size: int) -> tuple[np.ndarray, float, int, int]:
+    """Letterbox resize: fit image into target_size x target_size with gray padding.
+
+    Returns (letterboxed_image, scale, pad_x, pad_y).
+    """
+    import cv2  # type: ignore[import]
+    h, w = img.shape[:2]
+    scale = target_size / max(h, w)
+    new_w, new_h = int(w * scale), int(h * scale)
+    resized = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+    canvas = np.full((target_size, target_size, 3), 114, dtype=np.uint8)
+    pad_x = (target_size - new_w) // 2
+    pad_y = (target_size - new_h) // 2
+    canvas[pad_y:pad_y + new_h, pad_x:pad_x + new_w] = resized
+    return canvas, scale, pad_x, pad_y
+
+
 def _decode_image(image_bytes: bytes) -> np.ndarray:
-    """Binary → (INPUT_SIZE, INPUT_SIZE, 3) float32 numpy array. Uses OpenCV for speed."""
+    """Binary → (INPUT_SIZE, INPUT_SIZE, 3) uint8 numpy array with letterbox padding."""
+    global _letterbox_params
     import cv2  # type: ignore[import]
 
     buf = np.frombuffer(image_bytes, dtype=np.uint8)
     img = cv2.imdecode(buf, cv2.IMREAD_COLOR)  # BGR uint8
     if img is None:
-        # Fallback to PIL if cv2 fails
         from PIL import Image  # type: ignore[import]
         pil_img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         img = np.asarray(pil_img, dtype=np.uint8)
@@ -634,11 +677,14 @@ def _decode_image(image_bytes: bytes) -> np.ndarray:
             img = img[:, :, ::-1]
     elif COLOR_ORDER != "bgr":
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    img = cv2.resize(img, (INPUT_SIZE, INPUT_SIZE), interpolation=cv2.INTER_LINEAR)
-    arr = img.astype(np.float32)
+
+    letterboxed, scale, pad_x, pad_y = _letterbox_resize(img, INPUT_SIZE)
+    _letterbox_params = (scale, pad_x, pad_y)
+
     if NORMALIZE_INPUT:
-        arr *= (1.0 / 255.0)
-    return arr
+        arr = letterboxed.astype(np.float32) * (1.0 / 255.0)
+        return arr
+    return letterboxed  # uint8, [0, 255]
 
 
 def _sigmoid(x: Any) -> Any:
