@@ -68,6 +68,7 @@ class HUDRenderer:
         self._last_frame_id: int = -1
         self._cached_resized: np.ndarray | None = None
         self._last_tray_items: list = []  # persist tray data between updates
+        self._last_job_id: str | None = None  # clear cache on job change
 
     def render(self, canvas: np.ndarray, snap: _StateSnapshot) -> None:
         h, w = canvas.shape[:2]
@@ -97,7 +98,11 @@ class HUDRenderer:
         self._draw_ai_panel(canvas, snap, x=16, y=16)
         self._draw_network_panel(canvas, snap, x=w - 260, y=16)
 
-        # Persist tray items: keep previous data until new non-empty data arrives
+        # Clear tray cache when job changes; persist within same job
+        current_job_id = snap.scan_info.job_id if snap.scan_info else None
+        if current_job_id != self._last_job_id:
+            self._last_tray_items = []
+            self._last_job_id = current_job_id
         if snap.tray_items:
             self._last_tray_items = snap.tray_items
         display_tray_items = self._last_tray_items
