@@ -78,7 +78,7 @@ services:
       - HAILO_DEVICE=/dev/hailo0
       - HEF_PATH=/app/models/surgeonet_416.hef
       - CONF_THRESHOLD=0.25
-      - IOU_THRESHOLD=0.65
+      - IOU_THRESHOLD=0.50
       - NORMALIZE_INPUT=false
       - TEMP_WARNING_CELSIUS=85.0
       - TEMP_CRITICAL_CELSIUS=95.0

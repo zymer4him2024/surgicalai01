@@ -82,7 +82,7 @@ SKIP_BACKGROUND = os.getenv("SKIP_BACKGROUND", "true").lower() == "true"
 
 # NMS parameters
 CONF_THRESHOLD = float(os.getenv("CONF_THRESHOLD", "0.25"))
-IOU_THRESHOLD = float(os.getenv("IOU_THRESHOLD", "0.65"))
+IOU_THRESHOLD = float(os.getenv("IOU_THRESHOLD", "0.50"))
 
 # Whether to normalize input to [0, 1] before passing to SDK.
 # With UINT8 input mode, normalization is NOT needed — SDK uses HEF's compiled scale/zero_point.
@@ -774,7 +774,11 @@ def _postprocess_yolo(raw: Any) -> list[dict]:
 
 
 def _nms(detections: list[dict], max_det: int = 15) -> list[dict]:
-    """Simple NMS: IoU-based deduplication with max detection cap."""
+    """Per-class NMS: suppress duplicates within the same class only.
+
+    Different-class detections can overlap freely (e.g. forceps on top of scissor).
+    Same-class detections that overlap > IOU_THRESHOLD are treated as duplicates.
+    """
     if not detections:
         return []
     detections.sort(key=lambda d: d["confidence"], reverse=True)
@@ -782,7 +786,12 @@ def _nms(detections: list[dict], max_det: int = 15) -> list[dict]:
     for det in detections:
         if len(kept) >= max_det:
             break
-        if all(_iou(det["bbox"], k["bbox"]) < IOU_THRESHOLD for k in kept):
+        is_duplicate = False
+        for k in kept:
+            if det["class_id"] == k["class_id"] and _iou(det["bbox"], k["bbox"]) >= IOU_THRESHOLD:
+                is_duplicate = True
+                break
+        if not is_duplicate:
             kept.append(det)
     return kept
 
