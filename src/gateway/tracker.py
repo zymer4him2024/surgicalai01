@@ -209,13 +209,16 @@ class SurgicalTracker:
             t for t in self.tracks
             if t.is_confirmed and t.age <= self.max_age and t.class_name != "Background"
         ]
-        # Deduplicate: suppress same-class tracks with high IoU (keep higher total_hits)
+        # Deduplicate overlapping tracks (keep higher total_hits):
+        # - Same class, >30% IoU = duplicate of same object
+        # - Any class, >60% IoU = same physical object with class flip-flop
         active.sort(key=lambda t: t.total_hits, reverse=True)
         kept: list[Track] = []
         for t in active:
             is_dup = False
             for k in kept:
-                if t.class_name == k.class_name and _iou(t.bbox, k.bbox) > 0.4:
+                iou = _iou(t.bbox, k.bbox)
+                if (t.class_name == k.class_name and iou > 0.3) or iou > 0.6:
                     is_dup = True
                     break
             if not is_dup:

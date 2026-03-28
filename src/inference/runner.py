@@ -774,26 +774,38 @@ def _postprocess_yolo(raw: Any) -> list[dict]:
 
 
 def _nms(detections: list[dict], max_det: int = 15) -> list[dict]:
-    """Per-class NMS: suppress duplicates within the same class only.
+    """Two-stage NMS for INT8 quantized models.
 
-    Different-class detections can overlap freely (e.g. forceps on top of scissor).
-    Same-class detections that overlap > IOU_THRESHOLD are treated as duplicates.
+    Stage 1: Per-class NMS at IOU_THRESHOLD — same-class duplicates suppressed.
+    Stage 2: Cross-class NMS at 0.75 — near-identical boxes with different class
+             predictions (INT8 flip-flopping) are merged, keeping highest confidence.
     """
     if not detections:
         return []
     detections.sort(key=lambda d: d["confidence"], reverse=True)
-    kept: list[dict] = []
+    # Stage 1: per-class NMS
+    stage1: list[dict] = []
     for det in detections:
-        if len(kept) >= max_det:
-            break
-        is_duplicate = False
-        for k in kept:
+        is_dup = False
+        for k in stage1:
             if det["class_id"] == k["class_id"] and _iou(det["bbox"], k["bbox"]) >= IOU_THRESHOLD:
-                is_duplicate = True
+                is_dup = True
                 break
-        if not is_duplicate:
-            kept.append(det)
-    return kept
+        if not is_dup:
+            stage1.append(det)
+    # Stage 2: cross-class NMS for near-identical boxes (same physical object, different class)
+    stage2: list[dict] = []
+    for det in stage1:
+        if len(stage2) >= max_det:
+            break
+        is_dup = False
+        for k in stage2:
+            if _iou(det["bbox"], k["bbox"]) >= 0.75:
+                is_dup = True
+                break
+        if not is_dup:
+            stage2.append(det)
+    return stage2
 
 
 def _iou(a: list[float], b: list[float]) -> float:
