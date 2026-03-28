@@ -220,7 +220,7 @@ class SurgicalTracker:
             is_dup = False
             for k in kept:
                 iou = _iou(t.bbox, k.bbox)
-                if (t.class_name == k.class_name and iou > 0.3) or iou > 0.6:
+                if (t.class_name == k.class_name and iou > 0.3) or iou > 0.5:
                     is_dup = True
                     break
             if not is_dup:
