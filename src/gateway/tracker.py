@@ -145,6 +145,7 @@ class SurgicalTracker:
         self._next_id = 1
         self.tracks: list[Track] = []
         self._count_history: deque[tuple[str, ...]] = deque(maxlen=count_window)
+        self._deduped_tracks: list[Track] = []  # canonical active set — shared by update() and get_counts()
 
     def update(self, detections: list[dict]) -> list[dict]:
         """
@@ -192,65 +193,46 @@ class SurgicalTracker:
 
         self.tracks = [t for t in self.tracks if t.age <= self.max_age]
 
-        # Return all confirmed active tracks (age <= max_age), not just matched-this-frame (age == 0).
-        # get_counts() also uses age <= max_age, so bbox display stays consistent with the count.
-        # Without this, a track that misses one frame has no bbox but still appears in the count.
-        results = []
-        for track in self.tracks:
-            if track.is_confirmed(self.min_hits) and track.age <= self.max_age:
-                results.append({
-                    "track_id": track.track_id,
-                    "class_id": 0,
-                    "class_name": track.class_name,
-                    "confidence": track.confidence,
-                    "bbox": track.bbox,
-                })
-        return results
-
-    def get_counts(self) -> dict[str, int]:
-        """Count unique confirmed active tracks with temporal smoothing.
-
-        1. Deduplicates overlapping tracks (same-class >30% IoU, any-class >60% IoU)
-        2. Records per-class counts into a sliding window (last N frames)
-        3. Returns the mode (most frequent) count per class — suppresses transient spikes
-        """
+        # Deduplicate confirmed active tracks once — shared by bbox display and counting.
+        # Keeps higher total_hits track when same-class IoU >0.3 or cross-class IoU >0.5.
         active = [
             t for t in self.tracks
             if t.is_confirmed and t.age <= self.max_age and t.class_name != "Background"
         ]
-        # Deduplicate overlapping tracks (keep higher total_hits)
         active.sort(key=lambda t: t.total_hits, reverse=True)
-        kept: list[Track] = []
+        deduped: list[Track] = []
         for t in active:
             is_dup = False
-            for k in kept:
+            for k in deduped:
                 iou = _iou(t.bbox, k.bbox)
                 if (t.class_name == k.class_name and iou > 0.3) or iou > 0.5:
                     is_dup = True
                     break
             if not is_dup:
-                kept.append(t)
+                deduped.append(t)
+        self._deduped_tracks = deduped
 
-        # Raw counts this frame
+        return [
+            {
+                "track_id": t.track_id,
+                "class_id": 0,
+                "class_name": t.class_name,
+                "confidence": t.confidence,
+                "bbox": t.bbox,
+            }
+            for t in self._deduped_tracks
+        ]
+
+    def get_counts(self) -> dict[str, int]:
+        """Count from the deduplicated active track set computed in update().
+
+        Counts are taken directly from _deduped_tracks — no re-dedup, no temporal lag.
+        Stability comes from min_hits=3 (tracks must be seen 3 frames before counting).
+        """
         raw: dict[str, int] = {}
-        for t in kept:
+        for t in self._deduped_tracks:
             raw[t.class_name] = raw.get(t.class_name, 0) + 1
-
-        # Record raw counts into sliding window
-        self._count_history.append(dict(raw))
-
-        # Temporal smoothing: mode (most frequent) count per class over window
-        all_classes: set[str] = set()
-        for snap in self._count_history:
-            all_classes.update(snap.keys())
-
-        smoothed: dict[str, int] = {}
-        for cls in all_classes:
-            values = [snap.get(cls, 0) for snap in self._count_history]
-            mode_val = max(set(values), key=values.count)
-            if mode_val > 0:
-                smoothed[cls] = mode_val
-        return smoothed
+        return raw
 
     def get_active_track_count(self) -> int:
         return sum(1 for t in self.tracks if t.is_confirmed and t.age <= self.max_age)
@@ -259,3 +241,4 @@ class SurgicalTracker:
         self.tracks.clear()
         self._next_id = 1
         self._count_history.clear()
+        self._deduped_tracks = []
