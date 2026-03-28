@@ -108,11 +108,10 @@ class HUDRenderer:
         tray_ph = 52 + n_tray * tray_row_h + 34
         tray_y = h - tray_ph - 16
 
-        # DATA INFO: 50% larger, positioned above TRAY INFO
-        DATA_ROW_H = 34
+        # DATA INFO: same width as TRAY, 50% taller vertically, above TRAY
         if snap.scan_info is not None:
             n_targets = sum(1 for v in snap.scan_info.target.values() if v > 0)
-            data_ph = 100 + max(1, n_targets) * DATA_ROW_H
+            data_ph = 114 + max(1, n_targets) * 39
             data_y = tray_y - data_ph - 10
             self._draw_data_panel(canvas, snap, x=16, y=data_y)
 
@@ -243,36 +242,36 @@ class HUDRenderer:
             return
         si = snap.scan_info
         targets = [(k, v) for k, v in si.target.items() if v > 0]
-        ROW_H = 34
-        pw = 420
-        ph = 100 + max(1, len(targets)) * ROW_H
+        ROW_H = 39
+        pw = 310
+        ph = 114 + max(1, len(targets)) * ROW_H
 
         ch = canvas.shape[0]
         y = max(16, min(y, ch - ph - 8))
 
         self._panel_bg(canvas, x, y, pw, ph)
-        self._header(canvas, "[+] DATA INFO", x + 12, y + 26)
+        self._header(canvas, "[+] DATA INFO", x + 10, y + 28)
 
-        job_display = si.job_id if len(si.job_id) <= 30 else si.job_id[:27] + "..."
-        cv2.putText(canvas, f"Job:  {job_display}", (x + 14, y + 54),
-                    FONT_SMALL, 0.56, C_WHITE, 1, cv2.LINE_AA)
+        job_display = si.job_id if len(si.job_id) <= 26 else si.job_id[:23] + "..."
+        cv2.putText(canvas, f"Job:  {job_display}", (x + 12, y + 58),
+                    FONT_SMALL, 0.52, C_WHITE, 1, cv2.LINE_AA)
 
         scan_str = si.scanned_at if si.scanned_at else "waiting..."
-        cv2.putText(canvas, f"Scan: {scan_str}", (x + 14, y + 82),
-                    FONT_SMALL, 0.50, C_GRAY, 1, cv2.LINE_AA)
+        cv2.putText(canvas, f"Scan: {scan_str}", (x + 12, y + 88),
+                    FONT_SMALL, 0.46, C_GRAY, 1, cv2.LINE_AA)
 
-        start_y = y + 82
+        start_y = y + 88
         if not targets:
-            cv2.putText(canvas, "No targets", (x + 14, start_y + ROW_H),
-                        FONT_SMALL, 0.56, C_GRAY, 1, cv2.LINE_AA)
+            cv2.putText(canvas, "No targets", (x + 12, start_y + ROW_H),
+                        FONT_SMALL, 0.52, C_GRAY, 1, cv2.LINE_AA)
         else:
             for i, (cls, cnt) in enumerate(targets):
                 ry = start_y + (i + 1) * ROW_H
-                cls_disp = cls if len(cls) <= 24 else cls[:21] + "..."
-                cv2.putText(canvas, cls_disp, (x + 14, ry),
-                            FONT_SMALL, 0.56, C_WHITE, 1, cv2.LINE_AA)
-                cv2.putText(canvas, f"x {cnt}", (x + 360, ry),
-                            FONT_SMALL, 0.60, C_WARN, 1, cv2.LINE_AA)
+                cls_disp = cls if len(cls) <= 20 else cls[:17] + "..."
+                cv2.putText(canvas, cls_disp, (x + 12, ry),
+                            FONT_SMALL, 0.52, C_WHITE, 1, cv2.LINE_AA)
+                cv2.putText(canvas, f"x {cnt}", (x + 262, ry),
+                            FONT_SMALL, 0.56, C_WARN, 1, cv2.LINE_AA)
 
     # ── TRAY INFO panel (bottom-left, responsive) ────────────────────────────
 
