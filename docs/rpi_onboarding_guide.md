@@ -6,6 +6,24 @@
 
 ---
 
+## Phase 0: Initial Connection & Discovery
+
+Before you can configure the RPi, you must find it on your network.
+
+1.  **Auto-Discovery**: By default, the RPi should be reachable at `surgical-ai-01.local`.
+2.  **IP Discovery**: If `.local` fails, use one of these methods:
+    - **ARP Scan**: Run `arp -a | grep -i "dc:a6:32" (or "e4:5f:01")` on your Mac to find the Raspberry Pi's MAC address prefix.
+    - **Nmap**: `nmap -sn 192.168.1.0/24` (adjust for your subnet).
+    - **Scanner App**: Use "Fing" or similar mobile app.
+3.  **SSH Access**:
+    ```bash
+    ssh <user>@<rpi-ip>
+    ```
+    > [!WARNING]
+    > **Host Identification Error**: If you see "REMOTE HOST IDENTIFICATION HAS CHANGED", the RPi might have taken an IP previously used by another device. Fix with: `ssh-keygen -R <rpi-ip>`.
+
+---
+
 ## Phase 1: Hardware Assembly
 
 1.  **RPi5 Preparation**: Ensure you have the active cooler installed on the RPi5.
@@ -109,6 +127,25 @@ Run these checks to ensure the "blank" Pi is now a "surgical" Pi:
 
 ---
 
+## Phase 7: Remote Management & Maintenance
+
+### Updating the Application
+To apply code changes from your Mac to the RPi:
+1.  **Sync Source**: `scp src/... <user>@<ip>:~/SurgicalAI01/src/...`
+2.  **Rebuild**: `ssh <user>@<ip> "cd ~/SurgicalAI01 && docker compose build <service> && docker compose up -d"`
+
+### Cloning SD Cards (Multi-Pi Deployment)
+If you clone an SD card from one RPi to another:
+- **Hostname**: Update in `/etc/hostname` and `/etc/hosts`.
+- **Deployment State**: Delete `.deploy_state` before running `./install.sh` on the new Pi to trigger fresh `DEVICE_ID` assignment.
+- **Manual Swap**: `sed -i 's/^DEVICE_ID=.*/DEVICE_ID=<new-id>/' .env` then `docker compose up -d --force-recreate`.
+
+---
+
 ## Help & Troubleshooting
 
 Refer to the **Troubleshooting Ledger** in [CLAUDE.md](../CLAUDE.md) for common issues related to PCIe detection or container permissions.
+
+1.  **IP Shift**: If the RPi disappears, re-run Phase 0 to find its new IP.
+2.  **Camera 4K Latency**: Ensure you are using the blue USB 3.0 ports.
+3.  **HUD Blank**: Run `DISPLAY=:0 xhost +local:` if connecting via SSH.

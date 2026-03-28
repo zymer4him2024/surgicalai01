@@ -54,6 +54,11 @@ services:
       - MODULE_NAME=InferenceAgent
       - HAILO_DEVICE=/dev/null
       - HEF_PATH=/app/models/simulation.hef
+      # - LABELS_PATH=/app/models/labels.json
+      # - INPUT_SIZE=416
+      # - CONF_THRESHOLD=0.35
+      # - IOU_THRESHOLD=0.45
+      # - SKIP_BACKGROUND=true
       - TEMP_WARNING_CELSIUS=85.0
       - TEMP_CRITICAL_CELSIUS=95.0
       - INFERENCE_TIMEOUT_SEC=10
@@ -199,6 +204,8 @@ services:
       - DEVICE_ID=${DEVICE_ID}
       - DEVICE_CACHE_PATH=/app/data/device_cache.json
       - DEVICE_CACHE_TTL_HOURS=168
+      - CUSTOMER_MDM_URL=http://mock_customer_mdm:8007
+      - CUSTOMER_MDM_API_KEY=harness_secret_token_123
     expose:
       - '8005'
     ports:
@@ -220,6 +227,25 @@ services:
     volumes:
       - ./data:/app/data
       - ./firebase-credentials.json:/app/firebase-credentials.json:ro
+      - ./src:/app/src:ro
+
+  mock_customer_mdm:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python -m src.mock_customer_mdm.main
+    container_name: mock_customer_mdm
+    ports:
+      - "8017:8007"
+    environment:
+      - MODULE_NAME=MockCustomerMDM
+      - CUSTOMER_MDM_API_KEY=harness_secret_token_123
+    volumes:
+      - ./src:/app/src:ro
+    networks:
+      antigravity_bridge:
+        ipv4_address: 172.20.0.17
+    restart: unless-stopped
 
   mock_external_ai:
     build:

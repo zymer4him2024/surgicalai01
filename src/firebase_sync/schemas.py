@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 
 class EventType(str, Enum):
+    MATCH = "match"            # detection count matches target (success)
     MISMATCH = "mismatch"      # detection count mismatch (3 snapshots taken)
     ALERT = "alert"            # critical warning (NPU overheat, etc.)
     PERIODIC = "periodic"      # periodic normal-state recording

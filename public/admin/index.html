@@ -717,7 +717,7 @@
                     <!-- Bottom section: Recent Errors -->
                     <div class="p-6 flex-1 flex flex-col min-h-[300px]">
                         <div class="flex justify-between items-center mb-4">
-                            <h2 class="text-xs font-bold uppercase tracking-widest text-[#ff3b30]">Alert Feed</h2>
+                            <h2 class="text-xs font-bold uppercase tracking-widest text-[#0a84ff]">Activity Feed</h2>
                             <div
                                 class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-red-500/10 border border-red-500/20">
                                 <div class="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></div>
@@ -985,8 +985,14 @@
                         <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Framework</label>
                         <select id="model-framework" required
                             class="w-full bg-black/60 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-purple-500 transition-all cursor-pointer">
+                            <option value="yolov11">YOLOv11</option>
+                            <option value="yolov10">YOLOv10</option>
+                            <option value="yolov9">YOLOv9</option>
                             <option value="yolov8">YOLOv8</option>
                             <option value="yolov5">YOLOv5</option>
+                            <option value="rt-detr">RT-DETR</option>
+                            <option value="efficientdet">EfficientDet</option>
+                            <option value="ssd-mobilenet">SSD MobileNet</option>
                             <option value="custom">Custom</option>
                         </select>
                     </div>
@@ -999,8 +1005,9 @@
                     </div>
                     <div>
                         <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Class Count</label>
-                        <input type="number" id="model-class-count" placeholder="80" min="1" required
+                        <input type="number" id="model-class-count" placeholder="0 = object counting" min="0" required
                             class="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-purple-500 focus:bg-white/5 transition-all placeholder:text-gray-600 font-mono">
+                        <p class="text-[10px] text-gray-600 mt-1">0 = object counting (no class distinction)</p>
                     </div>
                 </div>
                 <div>

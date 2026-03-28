@@ -1,8 +1,10 @@
 """
-seed_presets.py — Push 20 surgical tray presets to Firestore job_config/{DEVICE_ID}.
+seed_presets.py — Push 10 total-count presets to Firestore job_config/{DEVICE_ID}.
 
-Run inside firebase_sync_agent container:
-  docker exec firebase_sync_agent python3 /tmp/seed_presets.py
+Each preset has a "total" target — match is based on total detected object count.
+
+Usage:
+  FIREBASE_CREDENTIALS_PATH=./firebase-credentials.json DEVICE_ID=US-Gas-001 python3 scripts/seed_presets.py
 """
 
 import json
@@ -24,16 +26,21 @@ def _get_credentials():
 
 
 APP_ID = os.getenv("APP_ID", "surgical")
-DEVICE_ID = os.getenv("DEVICE_ID", "rpi-001")
+DEVICE_ID = os.getenv("DEVICE_ID", "US-Gas-001")
 
-_CYCLE = [3, 4, 5]  # all match with 4 scissors + MATCH_TOLERANCE=1
 PRESETS = [
-    {"job_id": f"TRAY-{i:03d}", "target": {"Sur. Scissor": _CYCLE[(i - 1) % len(_CYCLE)]}}
-    for i in range(1, 21)
+    {"job_id": "SET-01", "target": {"total": 3}},
+    {"job_id": "SET-02", "target": {"total": 4}},
+    {"job_id": "SET-03", "target": {"total": 5}},
+    {"job_id": "SET-04", "target": {"total": 6}},
+    {"job_id": "SET-05", "target": {"total": 7}},
+    {"job_id": "SET-06", "target": {"total": 3}},
+    {"job_id": "SET-07", "target": {"total": 4}},
+    {"job_id": "SET-08", "target": {"total": 5}},
+    {"job_id": "SET-09", "target": {"total": 6}},
+    {"job_id": "SET-10", "target": {"total": 7}},
 ]
 
-# Each set: {"job_id": "TRAY-001", "target": {...}}
-# _do_load_current_set in firebase_sync unpacks this structure.
 sets = [{"job_id": p["job_id"], "target": p["target"]} for p in PRESETS]
 
 creds = _get_credentials()
@@ -44,9 +51,9 @@ doc_ref.set({
     "device_id": DEVICE_ID,
     "sets": sets,
     "cursor": 0,
+    "ts": firestore.SERVER_TIMESTAMP,
 }, merge=False)
 
 print(f"Written {len(sets)} presets to Firestore job_config/{DEVICE_ID} (app_id={APP_ID}):")
-for i, p in enumerate(PRESETS):
-    items = ", ".join(f"{k}:{v}" for k, v in p["target"].items())
-    print(f"  {p['job_id']}: {items}")
+for p in PRESETS:
+    print(f"  {p['job_id']}: total={p['target']['total']}")

@@ -395,6 +395,26 @@
         </div>
     </div>
 
+    <!-- Operation Detail Modal -->
+    <div id="op-modal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4" style="background:rgba(0,0,0,0.7);backdrop-filter:blur(8px)">
+        <div class="glass-card rounded-2xl w-full max-w-lg max-h-[80vh] overflow-y-auto custom-scrollbar p-6 relative">
+            <button id="op-modal-close" class="absolute top-4 right-4 text-gray-400 hover:text-white transition-colors">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+            <div id="op-modal-content"></div>
+        </div>
+    </div>
+
+    <!-- Snapshot Lightbox Modal -->
+    <div id="snap-lightbox" class="fixed inset-0 z-[60] hidden flex items-center justify-center p-4" style="background:rgba(0,0,0,0.85);backdrop-filter:blur(12px)">
+        <div class="w-full max-w-3xl max-h-[90vh] overflow-y-auto custom-scrollbar relative">
+            <button id="snap-lightbox-close" class="absolute -top-2 -right-2 z-10 w-8 h-8 flex items-center justify-center rounded-full bg-white/10 text-gray-300 hover:text-white hover:bg-white/20 transition-colors border border-white/10">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+            <div id="snap-lightbox-content" class="flex flex-col gap-3"></div>
+        </div>
+    </div>
+
     <script>
         (function () {
             var sidebar = document.getElementById('sidebar');

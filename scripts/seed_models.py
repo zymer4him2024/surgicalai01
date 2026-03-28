@@ -23,13 +23,33 @@ from google.cloud import firestore
 from google.oauth2 import service_account
 
 MODELS_DIR = Path(os.getenv("MODELS_DIR", "./models"))
-SUPPORTED_EXTS = {".hef", ".onnx", ".pt", ".tflite"}
+SUPPORTED_EXTS = {".hef", ".onnx", ".pt", ".tflite", ".engine", ".bin"}
 
 FRAMEWORK_MAP = {
     ".hef": "hailo-hef",
     ".onnx": "onnx",
     ".pt": "pytorch",
     ".tflite": "tflite",
+    ".engine": "tensorrt",
+    ".bin": "openvino",
+}
+
+FRAMEWORK_GUESS = {
+    "yolov11": "yolov11",
+    "yolo11": "yolov11",
+    "yolov10": "yolov10",
+    "yolo10": "yolov10",
+    "yolov9": "yolov9",
+    "yolo9": "yolov9",
+    "yolov8": "yolov8",
+    "yolo8": "yolov8",
+    "yolov5": "yolov5",
+    "yolo5": "yolov5",
+    "rtdetr": "rt-detr",
+    "rt-detr": "rt-detr",
+    "efficientdet": "efficientdet",
+    "ssd": "ssd-mobilenet",
+    "mobilenet": "ssd-mobilenet",
 }
 
 
@@ -84,6 +104,12 @@ def main():
 
         file_size_mb = round(f.stat().st_size / 1_048_576, 1)
         framework = FRAMEWORK_MAP.get(f.suffix.lower(), "unknown")
+        # Try to guess architecture from filename (e.g. yolov11n.hef -> yolov11)
+        stem_lower = f.stem.lower()
+        for pattern, arch in FRAMEWORK_GUESS.items():
+            if pattern in stem_lower:
+                framework = arch
+                break
 
         if existing.exists:
             # Preserve admin edits — only refresh file-level fields

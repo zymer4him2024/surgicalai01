@@ -130,6 +130,12 @@ HDMI info panel for gas inventory. No camera feed on display.
 - **Endpoints**: `POST /hud`, `GET /health`, `GET /snapshot`.
 - **Files**: `src/gas_display/` — `schemas.py`, `buffer.py`, `hud.py`, `main.py`.
 
+### Module E: Model Converter Agent (The "Alchemist") [UBUNTU x86 ONLY]
+Sole responsibility: Convert raw AI models (PT/ONNX) to Hailo HEF format.
+- **Endpoint**: `POST /convert/trigger`
+- **Environment**: Requires Ubuntu x86 with Hailo DFC 3.33.0.
+- **Resilience**: Features automatic retry-without-script for NMS optimization failures and version-pinned dependencies (protobuf<4, numpy<2).
+
 ---
 
 ## 7. System Status (Phase)
@@ -164,6 +170,9 @@ HDMI info panel for gas inventory. No camera feed on display.
 | Semantic SKU Mapper | `scripts/semantic_map_skus.py`: multilingual embedding pipeline (translate → English embed → cosine similarity) maps manufacturer SKUs to SurgeoNet classes. Thresholds: AUTO=0.60, REVIEW=0.40. |
 | Manufacturer Adapters | `adapters/edlo_adapter.py`, `adapters/rhosse_adapter.py`, `adapters/bahadir_adapter.py`: normalize Edlo (PT), Rhosse (PT), Bahadir (TR/DE/EN) API responses to standard `{sku, name, manufacturer}` format. |
 | Gas Cylinder Inventory Module | New APP_ID=`inventory_count` application (Bringel). Separate `gas_gateway_agent` (port 8010) and `gas_display_agent` (port 8013). Info-only HUD (no camera feed): total count, COUNTING/LOW_STOCK state, location, operator, timestamp. Periodic + manual snapshot sync to Firebase (`inventory_count_events`) and customer DB. Own `.env` per RPi. Compose: `docker-compose.gas.yml` (RPi), `docker-compose.gas.mac.yml` (Mac). Network: `gas_bridge` 172.21.0.0/16. Firestore: `inventory_count_events`, `gas_config/{deviceId}`. |
+| Model Converter Pipeline | Optimized and stabilized on Ubuntu x86. Pinned `protobuf<4` and `numpy<2` for DFC 3.33.0. Implemented unconditional retry logic for NMS optimization failures. |
+| Firestore Resilience | All status and log updates migrated to `.set(merge=True)` to support on-the-fly document creation for manual job triggers. |
+| RPi Onboarding | `docs/rpi_onboarding_guide.md` updated with "Phase 0: Initial Connection" and SSH/IP-shift troubleshooting. |
 
 ### Web Dashboard (Firebase Hosting & Authentication)
 Deployed on Firebase Hosting. Google Login required (enforced via `firestore.rules`).
@@ -387,3 +396,7 @@ docker compose up -d <service_name>
 29. **Inference input normalization**: HEF does NOT include /255 normalization. With `quantized=False`, SDK expects [0,1] float32. Sending [0,255] produces all-zero output. Fix: `NORMALIZE_INPUT=true` (default).
 30. **Inference color space**: Model trained with BGR (OpenCV native). RGB input causes random/wrong classifications. Fix: `COLOR_ORDER=bgr` (default).
 31. **SurgicalTracker class constraint blocking tracks**: IoU matching required `class_name` match, but INT8 quantization causes class flip-flopping between frames. Fix: removed class constraint from IoU matching; class voting (10-frame majority) handles classification.
+32. **`AttributeError: 'MessageFactory' object has no attribute 'GetPrototype'`**: Hailo DFC 3.33.0 is incompatible with `protobuf>=4`. Fix: pinned `protobuf<4` and `numpy<2` in `requirements.converter.txt`.
+33. **Firestore 404 during manual job trigger**: `firestore_client.py` used `.update()` which fails if the job document wasn't pre-created by the dashboard. Fix: use `.set(data, merge=True)` for all status/log updates.
+34. **Hailo Optimization `EOFError` / NMS failure**: Some models fail optimization due to unsupported DFL or NMS layers in the model script. Fix: implemented `_hailo_optimize` retry logic that strips the `--model-script` flag if the first attempt fails.
+35. **RPi SSH "Host Unreachable"**: RPi IP shifted from `.179` to `.180`. Fix: scanned local network with `arp -a`, updated SSH config, and added IP discovery steps to onboarding guide.

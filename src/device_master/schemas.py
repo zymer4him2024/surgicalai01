@@ -17,7 +17,7 @@ class DeviceLookupResponse(BaseModel):
     product_code: Optional[str] = None   # FDA 3-char product code (e.g. "GZY")
     device_class: Optional[str] = None   # FDA class: "I", "II", "III"
     medical_specialty: Optional[str] = None  # medical specialty classification
-    data_source: Literal["cache", "fallback", "firebase_catalog"] = "fallback"
+    data_source: Literal["cache", "fallback", "firebase_catalog", "mdm"] = "fallback"
 
 
 class CacheStatus(BaseModel):

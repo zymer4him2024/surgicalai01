@@ -46,7 +46,9 @@ def run_conversion(
     fmt = info.get("format", "")
     class_names = info.get("class_names", [])
     input_resolution = info.get("input_size") or 640
-    log(f"inspect_model: format={fmt}, classes={len(class_names)}, imgsz={input_resolution}")
+    arch = info.get("arch")  # yolov5, yolov8, yolov9, yolov10, yolov11, or None
+    num_classes = len(class_names) if class_names else 80
+    log(f"inspect_model: format={fmt}, arch={arch}, classes={num_classes}, imgsz={input_resolution}")
 
     # ── Step 2: Export ONNX (only for .pt) ───────────────────────────────────
     if fmt == "pt":
@@ -59,9 +61,13 @@ def run_conversion(
         if not result.get("ok"):
             return {"ok": False, "error": f"export_onnx failed: {result.get('error', '')}"}
         onnx_path = result["onnx_path"]
-        log(f"export_onnx: {onnx_path}")
+        log(f"export_onnx: {onnx_path} (validated)")
     elif fmt == "onnx":
         onnx_path = file_path
+        # Detect arch from ONNX if not already known
+        if not arch:
+            arch = tools._detect_yolo_arch_from_onnx(onnx_path)
+            log(f"ONNX arch detection: {arch or 'unknown'}")
     else:
         onnx_path = None  # .har input — skip straight to optimize
 
@@ -69,26 +75,33 @@ def run_conversion(
     if onnx_path:
         import re, os
         net_name = re.sub(r"[^a-zA-Z0-9_]", "_", os.path.splitext(os.path.basename(file_path))[0])[:32]
-        log(f"hailo_parse: parsing ONNX → HAR (net_name={net_name}, hw_arch={hw_arch})")
+        log(f"hailo_parse: parsing ONNX → HAR (net_name={net_name}, arch={arch}, hw_arch={hw_arch})")
         result = tools.dispatch("hailo_parse", {
             "onnx_path": onnx_path,
             "net_name": net_name,
             "hw_arch": hw_arch,
             "work_dir": work_dir,
+            "arch": arch,
         })
         if not result.get("ok"):
             return {"ok": False, "error": f"hailo_parse failed: {result.get('error', '')}"}
         har_path = result["har_path"]
+        # Parse may have refined arch detection
+        if result.get("arch") and not arch:
+            arch = result["arch"]
         log(f"hailo_parse: {har_path}")
     else:
         har_path = file_path  # input was already a .har
 
     # ── Step 4: Hailo Optimize ────────────────────────────────────────────────
-    log("hailo_optimize: quantizing to INT8")
+    log(f"hailo_optimize: quantizing to INT8 (arch={arch}, classes={num_classes}, imgsz={input_resolution})")
     opt_args: dict[str, Any] = {
         "har_path": har_path,
         "hw_arch": hw_arch,
         "work_dir": work_dir,
+        "arch": arch,
+        "num_classes": num_classes,
+        "input_resolution": input_resolution,
     }
     if calib_path:
         opt_args["calib_path"] = calib_path

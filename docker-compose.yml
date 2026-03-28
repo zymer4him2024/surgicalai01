@@ -29,6 +29,8 @@ services:
       - QR_DEBOUNCE_SEC=30.0
       - DEFAULT_TARGET={}
       - DEVICE_MASTER_URL=http://device_master_agent:8005
+      # Map INT8-confused model classes to canonical names. e.g. '{"Tong": "Sur. Scissor"}'
+      - CLASS_ALIASES_JSON=${CLASS_ALIASES_JSON:-{}}
     volumes:
       - ./src:/app/src:ro
       - /sys/class/thermal:/sys/class/thermal:ro

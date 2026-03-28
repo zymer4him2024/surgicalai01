@@ -142,7 +142,7 @@ function renderTimeline(slots) {
     }
 
     timelineFeed.innerHTML = valid.map(slot => {
-        const isMatch = slot.result === 'YES MATCH';
+        const isMatch = slot.result === 'GOOD' || slot.result === 'YES MATCH';
         const statusClass = isMatch ? 'status-match' : 'status-mismatch';
         const statusLabel = isMatch ? 'MATCH' : 'MISMATCH';
 
@@ -179,7 +179,7 @@ function renderTimeline(slots) {
                     </div>
                     <div class="flex flex-col items-end shrink-0 ml-4">
                         <span class="status-pill ${statusClass} mb-1.5">${statusLabel}</span>
-                        <span class="text-[10px] text-appleMuted font-mono bg-white/5 px-2 py-0.5 rounded">${escapeHtml(slot.scanned_at || '—')}</span>
+                        <span class="text-[10px] text-appleMuted font-mono bg-white/5 px-2 py-0.5 rounded">${escapeHtml(slot.scanned_at || (slot.timestamp?.toDate ? slot.timestamp.toDate().toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit'}) : (slot.logged_at ? new Date(slot.logged_at).toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit'}) : '—')))}</span>
                     </div>
                 </div>
                 
@@ -293,20 +293,41 @@ function initListener() {
 }
 
 function initInspectionLogListener() {
-    const docRef = doc(db, "inspection_log", "rpi");
-    unsubscribeInspectionLog = onSnapshot(docRef, (snap) => {
-        if (!snap.exists()) {
-            renderTimeline([]);
-            return;
-        }
-        const data = snap.data();
-        const slots = (data.slots || []).filter(s => s && s.job_id);
-        // Sort by logged_at descending so newest is first
-        slots.sort((a, b) => (b.logged_at || '').localeCompare(a.logged_at || ''));
-        renderTimeline(slots);
+    let opsData = [];
+    let logData = [];
+
+    function mergeAndRender() {
+        // If operations collection has data, use it; otherwise fall back to inspection_log
+        const combined = opsData.length > 0 ? opsData : logData;
+        renderTimeline(combined);
+    }
+
+    // Listen to operations collection (unbounded history)
+    const opsQ = query(collection(db, "operations"), orderBy("timestamp", "desc"), limit(50));
+    const unsubOps = onSnapshot(opsQ, (snapshot) => {
+        opsData = snapshot.docs.map(d => ({ id: d.id, ...d.data() })).filter(s => s.job_id);
+        mergeAndRender();
+    }, (error) => {
+        console.error("Operations Listen Error:", error);
+    });
+
+    // Listen to inspection_log (circular buffer fallback)
+    const logCol = collection(db, "inspection_log");
+    const unsubLog = onSnapshot(logCol, (snapshot) => {
+        const allSlots = [];
+        snapshot.forEach((docSnap) => {
+            const data = docSnap.data();
+            const s = (data.slots || []).filter(s => s && s.job_id);
+            allSlots.push(...s);
+        });
+        allSlots.sort((a, b) => (b.logged_at || '').localeCompare(a.logged_at || ''));
+        logData = allSlots;
+        mergeAndRender();
     }, (error) => {
         console.error("Inspection Log Listen Error:", error);
     });
+
+    unsubscribeInspectionLog = () => { unsubOps(); unsubLog(); };
 }
 
 // ── Projects Tab ───────────────────────────────────────────────────────────────
@@ -344,6 +365,7 @@ function initProjectsListeners() {
 // ── Project Detail (full-page panel) ──────────────────────────────────────────
 
 let unsubscribeDetailOps = null;
+let _unsubscribeDetailLog = null;
 
 function _switchToPanel(panelId) {
     document.querySelectorAll('[data-panel]').forEach(p => {
@@ -409,6 +431,7 @@ window.openProjectDrawer = function openProjectDetail(projectId) {
     document.getElementById('pd-operations').innerHTML = '<p class="text-gray-500 text-sm text-center py-10">Loading...</p>';
 
     if (unsubscribeDetailOps) { unsubscribeDetailOps(); unsubscribeDetailOps = null; }
+    if (_unsubscribeDetailLog) { _unsubscribeDetailLog(); _unsubscribeDetailLog = null; }
 
     if (deviceIds.length === 0) {
         document.getElementById('pd-operations').innerHTML =
@@ -420,31 +443,103 @@ window.openProjectDrawer = function openProjectDetail(projectId) {
         return;
     }
 
+    // Track all three data sources and merge
+    let syncOps = [];
+    let opsData = [];
+    let logData = [];
+    function mergeAndRender() {
+        // Prefer operations collection, fall back to inspection_log
+        const logSlots = opsData.length > 0 ? opsData : logData;
+        renderDetailOperations(syncOps, logSlots);
+    }
+
+    const unsubs = [];
+
+    // 1) sync_events filtered by device_id
     const q = query(
         collection(db, 'sync_events'),
         where('device_id', 'in', deviceIds.slice(0, 30)),
         orderBy('timestamp', 'desc'),
         limit(100)
     );
-
-    unsubscribeDetailOps = onSnapshot(q, snap => {
-        const ops = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        renderDetailOperations(ops);
+    unsubs.push(onSnapshot(q, snap => {
+        syncOps = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        mergeAndRender();
     }, err => {
-        console.error('Detail ops error:', err);
-        document.getElementById('pd-operations').innerHTML =
-            '<p class="text-gray-600 text-xs text-center py-10">Could not load operations — index may still be building (1–2 min).</p>';
+        console.error('Detail sync_events error:', err);
+        mergeAndRender();
+    }));
+
+    // 2) operations collection for linked devices
+    const opsQ = query(
+        collection(db, 'operations'),
+        where('device_id', 'in', deviceIds.slice(0, 30)),
+        orderBy('timestamp', 'desc'),
+        limit(100)
+    );
+    unsubs.push(onSnapshot(opsQ, snap => {
+        opsData = snap.docs.map(d => ({ id: d.id, ...d.data(), _source: 'log', _device_id: d.data().device_id })).filter(s => s.job_id);
+        mergeAndRender();
+    }, err => {
+        console.error('Detail operations error:', err);
+    }));
+
+    // 3) inspection_log fallback for linked devices
+    const logRefs = deviceIds.map(id => doc(db, 'inspection_log', id));
+    logRefs.forEach(ref => {
+        unsubs.push(onSnapshot(ref, snap => {
+            const devId = snap.id;
+            logData = logData.filter(s => s._device_id !== devId);
+            if (snap.exists()) {
+                const data = snap.data();
+                const slots = (data.slots || []).filter(s => s && s.job_id).map(s => ({ ...s, _source: 'log', _device_id: devId }));
+                logData.push(...slots);
+            }
+            mergeAndRender();
+        }, err => {
+            console.error('Detail inspection_log error:', err);
+        }));
     });
+
+    unsubscribeDetailOps = () => unsubs.forEach(u => u());
+    _unsubscribeDetailLog = null;
 };
 
-function renderDetailOperations(ops) {
+function renderDetailOperations(syncOps, logSlots) {
+    // Convert inspection_log slots to a unified format
+    const logOps = (logSlots || []).map(s => {
+        const isMatch = s.result === 'GOOD' || s.result === 'YES MATCH';
+        return {
+            _source: 'log',
+            job_id: s.job_id,
+            event_type: isMatch ? 'match' : 'mismatch',
+            device_id: s._device_id || s.device_id || '',
+            logged_at: s.logged_at || '',
+            target: s.target,
+            detected: s.detected,
+        };
+    });
+
+    // Merge: sync_events first (they have timestamps), then log slots
+    const all = [...syncOps, ...logOps];
+
+    // Sort: sync_events by timestamp, log by logged_at
+    all.sort((a, b) => {
+        const ta = a.timestamp?.toDate ? a.timestamp.toDate().getTime() : new Date(a.logged_at || 0).getTime();
+        const tb = b.timestamp?.toDate ? b.timestamp.toDate().getTime() : new Date(b.logged_at || 0).getTime();
+        return tb - ta;
+    });
+
     const now = new Date();
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const todayOps = ops.filter(o => o.timestamp?.toDate && o.timestamp.toDate().getTime() >= startOfToday);
-    const mismatches = ops.filter(o => o.event_type === 'mismatch' || o.event_type === 'alert');
-    const rate = ops.length > 0 ? Math.round(((ops.length - mismatches.length) / ops.length) * 100) : null;
+    const todayOps = all.filter(o => {
+        const t = o.timestamp?.toDate ? o.timestamp.toDate().getTime() : new Date(o.logged_at || 0).getTime();
+        return t >= startOfToday;
+    });
+    const mismatches = all.filter(o => o.event_type === 'mismatch' || o.event_type === 'alert');
+    const rate = all.length > 0 ? Math.round(((all.length - mismatches.length) / all.length) * 100) : null;
 
-    document.getElementById('pd-stat-total').textContent = ops.length;
+    document.getElementById('pd-stat-total').textContent = all.length;
     document.getElementById('pd-stat-rate').textContent = rate !== null ? `${rate}%` : '—';
     document.getElementById('pd-stat-mismatches').textContent = mismatches.length;
     document.getElementById('pd-stat-today').textContent = todayOps.length;
@@ -455,58 +550,212 @@ function renderDetailOperations(ops) {
         (op.missing_items || []).forEach(m => {
             missingCounts[m.class_name] = (missingCounts[m.class_name] || 0) + (m.count || 1);
         });
+        // Also diff target vs detected from inspection_log slots
+        if (op._source === 'log' && op.target && op.detected) {
+            Object.entries(op.target).forEach(([k, v]) => {
+                const det = op.detected[k] || 0;
+                if (det < v) {
+                    missingCounts[k] = (missingCounts[k] || 0) + (v - det);
+                }
+            });
+        }
     });
     const topMissing = Object.entries(missingCounts).sort((a, b) => b[1] - a[1]).slice(0, 5);
     const colors = ['text-red-400','text-orange-400','text-yellow-400','text-gray-400','text-gray-500'];
     document.getElementById('pd-missing').innerHTML = topMissing.length
         ? topMissing.map(([name, count], i) =>
             `<div class="flex items-center justify-between py-0.5">
-                <span class="text-xs ${colors[i]}">${name}</span>
+                <span class="text-xs ${colors[i]}">${escapeHtml(name)}</span>
                 <span class="text-xs font-mono text-gray-400">${count}×</span>
             </div>`).join('')
         : '<p class="text-xs italic text-gray-600">No missing items recorded</p>';
 
     // Operations list
     const opsEl = document.getElementById('pd-operations');
-    if (ops.length === 0) {
+    if (all.length === 0) {
         opsEl.innerHTML = '<p class="text-gray-600 text-sm text-center py-10">No operations found for this project.</p>';
         return;
     }
-    opsEl.innerHTML = ops.slice(0, 50).map(op => {
+
+    // Store for modal access
+    window._detailOpsCache = all;
+
+    opsEl.innerHTML = all.map((op, idx) => {
         const isMismatch = op.event_type === 'mismatch' || op.event_type === 'alert';
         const statusCls = isMismatch ? 'bg-red-500/15 text-red-400 border-red-500/20' : 'bg-green-500/15 text-green-400 border-green-500/20';
         const dotCls = isMismatch ? 'bg-red-400' : 'bg-green-400';
         const label = isMismatch ? 'Mismatch' : 'Match';
         const ts = op.timestamp?.toDate
             ? op.timestamp.toDate().toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+            : op.logged_at
+            ? new Date(op.logged_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
             : '—';
-        const missing = Array.isArray(op.missing_items) && op.missing_items.length
-            ? `<div class="mt-2 flex flex-wrap gap-1">
-                ${op.missing_items.map(m => `<span class="text-[9px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/15">${m.class_name} ×${m.count}</span>`).join('')}
-               </div>`
-            : '';
         return `
-        <div class="bg-white/[0.02] border border-white/5 rounded-xl p-3.5 hover:border-white/10 transition-colors">
+        <div class="op-row bg-white/[0.02] border border-white/5 rounded-xl p-3.5 hover:border-white/10 hover:bg-white/[0.04] transition-colors cursor-pointer" data-op-idx="${idx}">
             <div class="flex items-start justify-between gap-3 mb-1.5">
                 <div class="flex items-center gap-2 min-w-0">
                     <span class="w-1.5 h-1.5 rounded-full ${dotCls} shrink-0"></span>
-                    <span class="text-xs font-medium text-white truncate">${op.job_id || op.id}</span>
+                    <span class="text-xs font-medium text-white truncate">${escapeHtml(op.job_id || op.id)}</span>
                 </div>
                 <span class="status-badge border ${statusCls} text-[9px] shrink-0">${label}</span>
             </div>
             <div class="flex flex-wrap items-center gap-x-3 gap-y-0.5 pl-3.5 text-[10px] text-gray-500">
                 <span>${ts}</span>
-                ${op.device_id ? `<span class="font-mono text-gray-600">${op.device_id}</span>` : ''}
-                ${op.expected_count != null ? `<span>Expected <b class="text-gray-300">${op.expected_count}</b> · Got <b class="${isMismatch ? 'text-red-400' : 'text-green-400'}">${op.actual_count ?? '—'}</b></span>` : ''}
+                ${op.device_id ? `<span class="font-mono text-gray-600">${escapeHtml(op.device_id)}</span>` : ''}
             </div>
-            ${missing}
         </div>`;
     }).join('');
+
+    // Attach click handlers
+    opsEl.querySelectorAll('.op-row').forEach(row => {
+        row.addEventListener('click', () => {
+            const idx = parseInt(row.dataset.opIdx, 10);
+            const op = window._detailOpsCache[idx];
+            if (op) _showOpModal(op);
+        });
+    });
 }
 
 document.getElementById('back-to-projects')?.addEventListener('click', () => {
     if (unsubscribeDetailOps) { unsubscribeDetailOps(); unsubscribeDetailOps = null; }
     _switchToPanel('projects');
+});
+
+// ── Operation Detail Modal ────────────────────────────────────────────────────
+
+function _showOpModal(op) {
+    const modal = document.getElementById('op-modal');
+    const content = document.getElementById('op-modal-content');
+    if (!modal || !content) return;
+
+    const isMismatch = op.event_type === 'mismatch' || op.event_type === 'alert';
+    const statusCls = isMismatch ? 'bg-red-500/15 text-red-400 border-red-500/20' : 'bg-green-500/15 text-green-400 border-green-500/20';
+    const statusLabel = isMismatch ? 'Mismatch' : 'Match';
+    const ts = op.timestamp?.toDate
+        ? op.timestamp.toDate().toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+        : op.logged_at
+        ? new Date(op.logged_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+        : '—';
+
+    // Build target (DATA INFO) and detected (TRAY INFO)
+    const target = op.target || op.metadata?.target || {};
+    const detected = op.detected || op.metadata?.detected || {};
+
+    // For sync_events, detected_items is an array of {class_name, count}
+    let detectedMap = detected;
+    if (Array.isArray(op.detected_items) && op.detected_items.length && typeof detected !== 'object') {
+        detectedMap = {};
+        op.detected_items.forEach(d => {
+            if (d.class_name) detectedMap[d.class_name] = (detectedMap[d.class_name] || 0) + (d.count || 1);
+        });
+    }
+
+    // All keys from both target and detected
+    const allKeys = [...new Set([...Object.keys(target), ...Object.keys(detectedMap)])].filter(k => k !== 'total');
+    const totalTarget = target.total != null ? target.total : null;
+
+    function buildRows(items, colorFn) {
+        if (Object.keys(items).length === 0) return '<p class="text-xs italic text-gray-600 py-2">No data</p>';
+        return Object.entries(items).filter(([k]) => k !== 'total').map(([k, v]) => `
+            <div class="flex justify-between items-center py-2 border-b border-white/5 last:border-0">
+                <span class="text-sm text-gray-300">${escapeHtml(k)}</span>
+                <span class="text-sm font-mono ${colorFn ? colorFn(k, v) : 'text-white'}">${v}</span>
+            </div>`).join('');
+    }
+
+    const targetRows = totalTarget != null
+        ? `<div class="flex justify-between items-center py-2">
+               <span class="text-sm text-gray-300">Total Objects</span>
+               <span class="text-sm font-mono text-white font-bold">${totalTarget}</span>
+           </div>`
+        : buildRows(target, () => 'text-white');
+
+    const detectedRows = totalTarget != null
+        ? `<div class="flex justify-between items-center py-2">
+               <span class="text-sm text-gray-300">Total Detected</span>
+               <span class="text-sm font-mono font-bold ${Math.abs(Object.values(detectedMap).reduce((a,b)=>a+b,0) - totalTarget) <= 1 ? 'text-green-400' : 'text-red-400'}">${Object.values(detectedMap).reduce((a,b)=>a+b,0)}</span>
+           </div>` + buildRows(detectedMap, (k, v) => 'text-gray-300')
+        : buildRows(detectedMap, (k, v) => {
+            const expected = target[k];
+            if (expected == null) return 'text-gray-300';
+            return v >= expected ? 'text-green-400' : 'text-red-400';
+        });
+
+    // Snapshot button (opens lightbox)
+    const snapshots = op.snapshot_urls || [];
+    const snapshotHtml = snapshots.length
+        ? `<div class="mt-5 text-center">
+               <button id="op-view-snaps-btn" class="inline-flex items-center gap-2 px-5 py-2.5 bg-red-500/10 border border-red-500/20 rounded-xl text-xs font-bold uppercase tracking-wider text-red-400 hover:bg-red-500/20 transition-all shadow-sm">
+                   <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                   View Snapshots (${snapshots.length})
+               </button>
+           </div>`
+        : '';
+
+    content.innerHTML = `
+        <div class="mb-5">
+            <div class="flex items-center justify-between mb-1">
+                <h3 class="text-lg font-semibold text-white">${escapeHtml(op.job_id || op.id || '—')}</h3>
+                <span class="status-badge border ${statusCls} text-[10px]">${statusLabel}</span>
+            </div>
+            <div class="flex flex-wrap gap-3 text-[11px] text-gray-500">
+                <span>${ts}</span>
+                ${op.device_id ? `<span class="font-mono">${escapeHtml(op.device_id)}</span>` : ''}
+            </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+            <div class="bg-white/[0.03] rounded-xl p-4 border border-white/5">
+                <div class="flex items-center gap-2 mb-3">
+                    <div class="w-1.5 h-1.5 rounded-full bg-blue-400 shadow-[0_0_8px_rgba(41,151,255,0.4)]"></div>
+                    <p class="text-[10px] font-bold uppercase tracking-widest text-gray-500">Data Info</p>
+                </div>
+                ${targetRows}
+            </div>
+            <div class="bg-white/[0.03] rounded-xl p-4 border border-white/5">
+                <div class="flex items-center gap-2 mb-3">
+                    <div class="w-1.5 h-1.5 rounded-full ${isMismatch ? 'bg-red-400 shadow-[0_0_8px_rgba(255,59,48,0.4)]' : 'bg-green-400 shadow-[0_0_8px_rgba(52,199,89,0.4)]'}"></div>
+                    <p class="text-[10px] font-bold uppercase tracking-widest text-gray-500">Tray Info</p>
+                </div>
+                ${detectedRows}
+            </div>
+        </div>
+        ${snapshotHtml}
+    `;
+
+    modal.classList.remove('hidden');
+
+    // Attach snapshot lightbox handler
+    const snapBtn = document.getElementById('op-view-snaps-btn');
+    if (snapBtn && snapshots.length) {
+        snapBtn.addEventListener('click', () => _openSnapLightbox(snapshots));
+    }
+}
+
+function _openSnapLightbox(urls) {
+    const lightbox = document.getElementById('snap-lightbox');
+    const content = document.getElementById('snap-lightbox-content');
+    if (!lightbox || !content) return;
+
+    content.innerHTML = urls.map((url, i) => `
+        <img src="${escapeHtml(url)}" class="w-full rounded-xl border border-white/10 shadow-lg" loading="lazy" alt="Snapshot ${i + 1}">
+    `).join('');
+
+    lightbox.classList.remove('hidden');
+}
+
+// Modal close handlers
+document.getElementById('op-modal-close')?.addEventListener('click', () => {
+    document.getElementById('op-modal')?.classList.add('hidden');
+});
+document.getElementById('op-modal')?.addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) e.currentTarget.classList.add('hidden');
+});
+document.getElementById('snap-lightbox-close')?.addEventListener('click', () => {
+    document.getElementById('snap-lightbox')?.classList.add('hidden');
+});
+document.getElementById('snap-lightbox')?.addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) e.currentTarget.classList.add('hidden');
 });
 
 const STATUS_COLOR = {

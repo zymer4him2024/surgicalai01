@@ -39,6 +39,10 @@ MODULE_NAME = os.getenv("MODULE_NAME", "DeviceMasterAgent")
 APP_ID = os.getenv("APP_ID", "unknown")
 DEVICE_ID = os.getenv("DEVICE_ID", "unknown")
 
+# Customer MDM Configuration
+CUSTOMER_MDM_URL = os.getenv("CUSTOMER_MDM_URL")
+CUSTOMER_MDM_API_KEY = os.getenv("CUSTOMER_MDM_API_KEY")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
@@ -98,7 +102,14 @@ async def lookup_device(label: str) -> DeviceLookupResponse:
     if entry is not None:
         return entry
 
-    logger.info("Cache miss for label=%r — using local fallback", normalized)
+    # Tier 2: External Customer MDM Lookup
+    logger.info("Cache miss for label=%r — trying external MDM", normalized)
+    mdm_entry = await _lookup_mdm(normalized)
+    if mdm_entry is not None:
+        return mdm_entry
+
+    # Tier 3: Local labels.json fallback
+    logger.info("MDM miss for label=%r — using local fallback", normalized)
     from src.device_master.cache import _load_labels_json
     labels_config = _load_labels_json()
     cfg = labels_config.get(normalized)
@@ -155,6 +166,43 @@ async def _check_firebase() -> bool:
             return resp.status_code in (200, 400, 404)  # any HTTP response = reachable
     except Exception:
         return False
+
+
+async def _lookup_mdm(label: str) -> DeviceLookupResponse | None:
+    """Tier 2 lookup: Call the hospital-internal or mock MDM API."""
+    if not CUSTOMER_MDM_URL:
+        return None
+
+    try:
+        headers = {}
+        if CUSTOMER_MDM_API_KEY:
+            headers["Authorization"] = f"Bearer {CUSTOMER_MDM_API_KEY}"
+
+        # Note: We use a tight timeout (2.0s) to avoid blocking the detection loop
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            url = f"{CUSTOMER_MDM_URL.rstrip('/')}/device/lookup"
+            resp = await client.get(url, params={"label": label}, headers=headers)
+
+            if resp.status_code == 200:
+                data = resp.json()
+                logger.info("MDM hit for label=%r", label)
+                return DeviceLookupResponse(
+                    yolo_label=data.get("detection_label", label),
+                    device_name=data.get("device_name", label),
+                    product_code=data.get("product_code"),
+                    device_class=data.get("device_class"),
+                    medical_specialty=data.get("medical_specialty"),
+                    data_source="mdm",
+                )
+            elif resp.status_code == 404:
+                logger.info("MDM 404 for label=%r", label)
+            else:
+                logger.warning("MDM returned status=%d for label=%r", resp.status_code, label)
+
+    except Exception as e:
+        logger.error("Error during MDM lookup for label %r: %s", label, e)
+
+    return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────

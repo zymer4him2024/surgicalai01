@@ -93,42 +93,59 @@ function openSnapshots(urls) {
 }
 
 // Data Processing
+function formatLocalTime(ts) {
+    if (!ts) return { time: 'N/A', date: '' };
+    const d = new Date(ts.toMillis());
+    const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+    const date = d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+    return { time, date };
+}
+
+const EVENT_BADGE = {
+    match:    'badge-match',
+    mismatch: 'badge-error',
+    alert:    'badge-error',
+    error:    'badge-error',
+};
+
 function processData(eventsData) {
     if (eventsData.length === 0) {
-        errorTableBody.innerHTML = '<tr><td colspan="4" class="py-12 px-6 text-center text-appleMuted italic">No recent errors detected in the last 50 events.</td></tr>';
+        errorTableBody.innerHTML = '<tr><td colspan="4" class="py-12 px-6 text-center text-appleMuted italic">No recent activity in the last 50 events.</td></tr>';
         return;
     }
 
     errorTableBody.innerHTML = '';
-    eventsData.forEach(err => {
-        const timeStr = err.timestamp ? new Date(err.timestamp.toMillis()).toLocaleString() : 'N/A';
-        const jobId = err.metadata?.job_id || 'Unknown';
-        const reason = err.metadata?.reason || err.event_type;
+    eventsData.forEach(ev => {
+        const { time, date } = formatLocalTime(ev.timestamp);
+        const jobId = ev.metadata?.job_id || 'Unknown';
+        const eventType = ev.event_type || 'unknown';
+        const reason = ev.metadata?.reason || eventType;
+        const badgeClass = EVENT_BADGE[eventType] || 'badge-ready';
         const tr = document.createElement('tr');
         tr.className = 'group hover:bg-white/[0.03] transition-all border-b border-white/5 last:border-0';
 
-        let btnHtml = '<span class="text-xs text-gray-600 font-medium">No Snapshots</span>';
-        if (err.snapshot_urls && err.snapshot_urls.length > 0) {
+        let btnHtml = '';
+        if (ev.snapshot_urls && ev.snapshot_urls.length > 0) {
             btnHtml = `<button class="view-btn px-4 py-1.5 bg-red-500/10 border border-red-500/20 rounded-xl text-[10px] font-bold uppercase tracking-wider text-red-400 hover:bg-red-500/20 transition-all shadow-sm">View Snaps</button>`;
         }
 
         tr.innerHTML = `
             <td class="py-4 px-6">
                 <div class="flex flex-col">
-                    <span class="text-white font-medium">${timeStr.split(', ')[1]}</span>
-                    <span class="text-[10px] text-appleMuted">${timeStr.split(', ')[0]}</span>
+                    <span class="text-white font-medium">${time}</span>
+                    <span class="text-[10px] text-appleMuted">${date}</span>
                 </div>
             </td>
             <td class="py-4 px-6 font-mono font-semibold text-blue-400/80 group-hover:text-blue-400 transition-colors">${jobId}</td>
             <td class="py-4 px-6">
-                <span class="status-badge badge-error">${reason}</span>
+                <span class="status-badge ${badgeClass}">${reason}</span>
             </td>
             <td class="py-4 px-6 text-right">${btnHtml}</td>
         `;
 
-        if (err.snapshot_urls && err.snapshot_urls.length > 0) {
+        if (ev.snapshot_urls && ev.snapshot_urls.length > 0) {
             const btn = tr.querySelector('.view-btn');
-            btn.onclick = () => openSnapshots(err.snapshot_urls);
+            btn.onclick = () => openSnapshots(ev.snapshot_urls);
         }
         errorTableBody.appendChild(tr);
     });
@@ -204,7 +221,7 @@ function initOverview() {
     if (!container) return;
 
     // State tracked per card
-    const counts = { projects: '—', customers: '—', devices: '—', alerts: '—', devicesOnline: '—' };
+    const counts = { projects: '—', customers: '—', devices: '—', alerts: '—', operations: '—', devicesOnline: '—' };
 
     function renderCards() {
         container.innerHTML = [
@@ -236,13 +253,13 @@ function initOverview() {
                 icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/>`,
             },
             {
-                label: 'Recent Alerts',
-                value: counts.alerts,
-                sub: 'last 50 events',
-                color: 'text-[#ff3b30]',
-                bg: 'bg-red-500/10',
-                border: 'border-red-500/20',
-                icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>`,
+                label: 'Operations',
+                value: counts.operations,
+                sub: `${counts.alerts} alerts`,
+                color: 'text-[#ff9f0a]',
+                bg: 'bg-orange-500/10',
+                border: 'border-orange-500/20',
+                icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>`,
             },
         ].map(card => `
             <div class="glass-card rounded-2xl p-5 border ${card.border} flex flex-col gap-3">
@@ -289,12 +306,19 @@ function initOverview() {
         }, () => { counts.devices = 'err'; counts.devicesOnline = 'err'; renderCards(); })
     );
 
-    // Recent alerts — last 50 mismatch/alert events
+    // Recent operations — all sync_events, count alerts separately
     unsubscribeOverview.push(
         onSnapshot(
-            query(collection(db, 'sync_events'), where('event_type', 'in', ['mismatch', 'alert']), limit(50)),
-            snap => { counts.alerts = snap.size; renderCards(); },
-            () => { counts.alerts = 'err'; renderCards(); }
+            query(collection(db, 'sync_events'), orderBy('timestamp', 'desc'), limit(50)),
+            snap => {
+                counts.operations = snap.size;
+                counts.alerts = snap.docs.filter(d => {
+                    const et = d.data().event_type;
+                    return et === 'mismatch' || et === 'alert';
+                }).length;
+                renderCards();
+            },
+            () => { counts.operations = 'err'; counts.alerts = 'err'; renderCards(); }
         )
     );
 }
@@ -637,7 +661,7 @@ function renderApplications() {
                 ? `<span class="font-mono text-[10px]">${model.name} v${model.version}</span>`
                 : '<span class="italic text-gray-600">—</span>';
             const created = a.created_at?.toDate
-                ? a.created_at.toDate().toLocaleDateString()
+                ? a.created_at.toDate().toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
                 : '—';
             return `
             <tr class="group hover:bg-white/[0.03] transition-all">
@@ -739,11 +763,24 @@ function openModelModal(model = null) {
     document.getElementById('model-type').value = model?.type || 'internal';
     document.getElementById('model-framework').value = model?.framework || 'yolov8';
     document.getElementById('model-input-resolution').value = model?.input_resolution || '';
-    document.getElementById('model-class-count').value = model?.class_count || '';
+    document.getElementById('model-class-count').value = model?.class_count ?? '';
     document.getElementById('model-hef-path').value = model?.hef_path || '';
     document.getElementById('model-class-labels').value = model?.class_labels?.join(', ') || '';
     document.getElementById('model-status').value = model?.status || 'active';
     addModelModal.classList.remove('hidden');
+}
+
+function _guessFramework(name) {
+    const n = name.toLowerCase();
+    if (/yolov11|yolo11/.test(n)) return 'yolov11';
+    if (/yolov10|yolo10/.test(n)) return 'yolov10';
+    if (/yolov9|yolo9/.test(n)) return 'yolov9';
+    if (/yolov8|yolo8/.test(n)) return 'yolov8';
+    if (/yolov5|yolo5/.test(n)) return 'yolov5';
+    if (/rt-?detr|rtdetr/.test(n)) return 'rt-detr';
+    if (/efficientdet/.test(n)) return 'efficientdet';
+    if (/ssd|mobilenet/.test(n)) return 'ssd-mobilenet';
+    return 'yolov8';
 }
 
 const MODEL_TYPE_BADGE = {
@@ -822,7 +859,8 @@ function renderModels() {
         ${modelsData.map(m => {
             const typeBadge = MODEL_TYPE_BADGE[m.type] || MODEL_TYPE_BADGE.internal;
             const statusBadge = MODEL_STATUS_BADGE[m.status] || MODEL_STATUS_BADGE.active;
-            const classCount = Array.isArray(m.class_labels) ? m.class_labels.length : (m.class_count ?? '—');
+            const rawCount = Array.isArray(m.class_labels) && m.class_labels.length > 0 ? m.class_labels.length : (m.class_count ?? '—');
+            const classCount = rawCount === 0 ? 'Obj Count' : rawCount;
             const convStatus = m.conversion_status;
             const convBadge = convStatus ? CONVERSION_STATUS_BADGE[convStatus] || CONVERSION_STATUS_BADGE.pending_conversion : null;
             const convLabel = convStatus ? convStatus.replace(/_/g, ' ') : null;
@@ -974,7 +1012,7 @@ if (convertHefForm) convertHefForm.addEventListener('submit', async e => {
             name: modelName,
             version: '1.0.0',
             type: 'internal',
-            framework: format === 'pt' ? 'yolov8' : 'custom',
+            framework: format === 'pt' ? _guessFramework(modelName) : 'custom',
             hw_arch: hwArch,
             original_format: format,
             conversion_status: 'uploading',
@@ -1148,7 +1186,7 @@ function renderProjects() {
             const appBadge = APP_ID_BADGE[p.app_id] || 'bg-gray-500/15 text-gray-400 border-gray-500/20';
             const statusBadge = STATUS_BADGE[p.status] || STATUS_BADGE.active;
             const created = p.created_at?.toDate
-                ? p.created_at.toDate().toLocaleDateString()
+                ? p.created_at.toDate().toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
                 : '—';
             return `
             <tr class="group hover:bg-white/[0.03] transition-all cursor-pointer" onclick="window.openProjectDetail('${p.id}')">
@@ -1288,7 +1326,7 @@ window.openProjectDetail = function(projectId) {
     document.getElementById('pd-app-badge').className = `status-badge border ${appBadge}`;
     document.getElementById('pd-app-badge').textContent = p.app_id || '';
     document.getElementById('pd-created').textContent = p.created_at?.toDate
-        ? 'Created ' + p.created_at.toDate().toLocaleDateString()
+        ? 'Created ' + p.created_at.toDate().toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
         : '';
 
     projectDetailModal.style.display = 'flex';
@@ -1571,8 +1609,22 @@ function renderCustomers() {
         });
     });
     customersTableBody.querySelectorAll('.delete-customer-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            alert(`Customer "${btn.dataset.name}" cannot be deleted.\n\nCustomers may be linked to active projects. Remove the customer from all projects first.`);
+        btn.addEventListener('click', async () => {
+            const customerId = btn.dataset.id;
+            const name = btn.dataset.name;
+            const linkedProjects = projectsData.filter(p => p.customer_id === customerId);
+            if (linkedProjects.length > 0) {
+                const names = linkedProjects.map(p => p.name).join(', ');
+                alert(`Customer "${name}" is linked to ${linkedProjects.length} project(s): ${names}.\n\nRemove the customer from all projects first.`);
+                return;
+            }
+            if (!confirm(`Delete customer "${name}"? This cannot be undone.`)) return;
+            try {
+                await deleteDoc(doc(db, 'customers', customerId));
+            } catch (err) {
+                console.error('Delete customer error:', err);
+                alert('Failed to delete customer: ' + err.message);
+            }
         });
     });
     customersTableBody.querySelectorAll('.edit-customer-btn').forEach(btn => {
@@ -1759,7 +1811,6 @@ addDeviceForm.addEventListener('submit', async (e) => {
 function initListener() {
     const q = query(
         collection(db, "sync_events"),
-        where("event_type", "in", ["mismatch", "alert"]),
         orderBy("timestamp", "desc"),
         limit(50)
     );

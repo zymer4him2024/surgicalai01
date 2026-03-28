@@ -21,10 +21,30 @@ async function upsertUserDoc(user) {
     await setDoc(ref, data, { merge: true });
 }
 
-export function setupAuthUI(requireLoginCallback, loggedInCallback) {
-    onAuthStateChanged(auth, (user) => {
+export function setupAuthUI(requireLoginCallback, loggedInCallback, pendingApprovalCallback) {
+    onAuthStateChanged(auth, async (user) => {
         if (user) {
-            upsertUserDoc(user).catch(err => console.warn('upsertUserDoc failed:', err));
+            // Ensure user doc exists before checking approval
+            try {
+                await upsertUserDoc(user);
+            } catch (err) {
+                console.warn('upsertUserDoc failed:', err);
+            }
+            // Admins (custom claim) bypass approval gate
+            if (pendingApprovalCallback) {
+                try {
+                    const token = await user.getIdTokenResult();
+                    if (!token.claims.admin) {
+                        const userSnap = await getDoc(doc(db, 'users', user.uid));
+                        if (!userSnap.exists() || userSnap.data().approved !== true) {
+                            pendingApprovalCallback(user);
+                            return;
+                        }
+                    }
+                } catch (err) {
+                    console.warn('approval check failed:', err);
+                }
+            }
             loggedInCallback(user);
         } else {
             requireLoginCallback();

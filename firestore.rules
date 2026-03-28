@@ -7,6 +7,10 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isAdmin() {
+      return request.auth != null && request.auth.token.admin == true;
+    }
+
     function validDeviceFields() {
       let d = request.resource.data;
       return d.device_id is string
@@ -15,10 +19,11 @@ service cloud.firestore {
           && d.app_id in ['surgical', 'od', 'inventory', 'inventory_count', 'unassigned'];
     }
 
-    // Users — authenticated users can read/write their own profile
+    // Users — authenticated users can read/write their own profile; admins can update any user
     match /users/{userId} {
       allow read: if isAuthenticated();
-      allow create, update: if isAuthenticated() && request.auth.uid == userId;
+      allow create, update: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow delete: if isAdmin();
     }
 
     // Device registry — authenticated users can read;
@@ -83,6 +88,12 @@ service cloud.firestore {
 
     // Inspection log — backend writes only; authenticated users can read
     match /inspection_log/{deviceId} {
+      allow read: if isAuthenticated();
+      allow write: if false;
+    }
+
+    // Operations — full history of inspection rounds; backend writes only
+    match /operations/{operationId} {
       allow read: if isAuthenticated();
       allow write: if false;
     }

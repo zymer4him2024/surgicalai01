@@ -38,10 +38,14 @@ def poll_pending_jobs() -> list[dict[str, Any]]:
 
 
 def set_status(model_id: str, status: str, **extra_fields) -> None:
-    """Update conversion_status and any extra fields on the model doc."""
+    """Update conversion_status and any extra fields on the model doc.
+
+    Uses set(merge=True) so the document is created if it doesn't exist
+    (e.g. when triggered via /convert/trigger instead of Firestore polling).
+    """
     try:
         update: dict[str, Any] = {"conversion_status": status, **extra_fields}
-        _db().collection("models").document(model_id).update(update)
+        _db().collection("models").document(model_id).set(update, merge=True)
         logger.info("models/%s → conversion_status=%s", model_id, status)
     except Exception as exc:
         logger.warning("set_status error for %s: %s", model_id, exc)
@@ -76,8 +80,8 @@ def reset_stale_jobs() -> None:
 def append_log(model_id: str, line: str) -> None:
     """Append a log line to the model doc's conversion_log array."""
     try:
-        _db().collection("models").document(model_id).update(
-            {"conversion_log": ArrayUnion([line])}
+        _db().collection("models").document(model_id).set(
+            {"conversion_log": ArrayUnion([line])}, merge=True
         )
     except Exception as exc:
         logger.warning("append_log error for %s: %s", model_id, exc)

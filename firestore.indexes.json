@@ -105,6 +105,14 @@
                 { "fieldPath": "project_id", "order": "ASCENDING" },
                 { "fieldPath": "timestamp", "order": "DESCENDING" }
             ]
+        },
+        {
+            "collectionGroup": "operations",
+            "queryScope": "COLLECTION",
+            "fields": [
+                { "fieldPath": "device_id", "order": "ASCENDING" },
+                { "fieldPath": "timestamp", "order": "DESCENDING" }
+            ]
         }
     ],
     "fieldOverrides": []

@@ -55,7 +55,7 @@ DEVICE_MASTER_URL = os.getenv("DEVICE_MASTER_URL", "http://device_master_agent:8
 
 GATEWAY_TIMEOUT = float(os.getenv("GATEWAY_TIMEOUT_SEC", "15"))
 HEALTH_TIMEOUT = 3.0
-MATCH_TOLERANCE = int(os.getenv("MATCH_TOLERANCE", "1"))  # ±N count tolerance for unstable inference
+MATCH_TOLERANCE = int(os.getenv("MATCH_TOLERANCE", "0"))  # ±N count tolerance (0 = exact match required)
 # Optional API key enforcement. If unset (empty), /job endpoint is open (backwards-compatible).
 # To enable: set GATEWAY_API_KEY=<secret> in .env and pass X-API-Key: <secret> header.
 GATEWAY_API_KEY = os.getenv("GATEWAY_API_KEY", "")
@@ -67,6 +67,14 @@ try:
     DEFAULT_TARGET: dict[str, int] = _json.loads(os.getenv("DEFAULT_TARGET", "{}"))
 except (ValueError, TypeError):
     DEFAULT_TARGET = {}
+
+# Class alias map — normalizes INT8-confused model classes to canonical names before tracker.
+# Example: '{"Tong": "Sur. Scissor"}' maps all "Tong" detections to "Sur. Scissor".
+# This fixes both wrong label display AND wrong count (aliases collapse to same class for NMS/dedup).
+try:
+    CLASS_ALIASES: dict[str, str] = _json.loads(os.getenv("CLASS_ALIASES_JSON", "{}"))
+except (ValueError, TypeError):
+    CLASS_ALIASES = {}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Shared HTTP client
@@ -80,13 +88,15 @@ _http_client: httpx.AsyncClient | None = None
 # ─────────────────────────────────────────────────────────────────────────────
 
 class SystemState:
-    READY = "READY"  # scanning (target N items) - yellow
-    MATCH = "MATCH"  # count matches - green
-    ERROR = "ERROR"  # mismatch (5s → snapshot) - red
+    READY = "READY"       # scanning (target N items) - yellow
+    MATCH = "MATCH"       # count matches - green
+    ERROR = "ERROR"       # mismatch (5s → snapshot) - red
+    WAIT_CLEAR = "WAIT_CLEAR"  # decision made, waiting for empty tray before "Scan QR"
 
 current_state: str = SystemState.READY
 current_job: dict[str, Any] | None = None
 mismatch_start_time: float | None = None
+_wait_clear_result: str | None = None  # "MATCH" or "ERROR" — remembers the decision during WAIT_CLEAR
 inference_running: bool = True
 camera_active: bool = True
 display_active: bool = True
@@ -97,6 +107,8 @@ _match_achieved_at: float | None = None
 _error_achieved_at: float | None = None
 _pending_preset: dict | None = None
 _latest_tracked_dets: list[dict] = []
+_no_det_since: float | None = None  # monotonic time when detections first dropped to zero
+_CLEAR_BBOX_SEC = 2.0               # seconds of zero detections before clearing display boxes
 
 _tracker = SurgicalTracker(
     max_age=10,        # 10 frames covers thermal throttle gaps (at 2fps HOT = 5s; at 5fps NORMAL = 2s)
@@ -424,7 +436,7 @@ async def _counting_loop() -> None:
     Temperature is sampled at the TOP of each cycle so throttle decisions
     are always based on current readings, not last cycle's stale data.
     """
-    global current_state, mismatch_start_time, _tracked_detections, last_scanned_qr, _match_achieved_at, _error_achieved_at, current_job, _pending_preset, _latest_tracked_dets
+    global current_state, mismatch_start_time, _tracked_detections, last_scanned_qr, _match_achieved_at, _error_achieved_at, current_job, _pending_preset, _latest_tracked_dets, _no_det_since, _wait_clear_result
     logger.info("Counting loop started (thermal-aware throttling enabled)")
 
     TEMP_NORMAL = 75.0
@@ -521,9 +533,89 @@ async def _counting_loop() -> None:
             raw_dets = data.get("detections", [])
 
             tracked_dets = _tracker.update(raw_dets)
+
+            # Apply class aliases AFTER tracker — tracker keeps original model classes
+            # for NMS/dedup (so physically distinct instruments aren't merged), but
+            # display and count comparison use canonical names.
+            if CLASS_ALIASES:
+                for det in tracked_dets:
+                    det["class_name"] = CLASS_ALIASES.get(det["class_name"], det["class_name"])
+
             _tracked_detections = tracked_dets
 
-            actual_counts = _tracker.get_counts()
+            # ── WAIT_CLEAR state: decision already made, waiting for empty tray ──
+            if current_state == SystemState.WAIT_CLEAR:
+                # Forward bboxes to display while instruments are still visible
+                if display_active and tracked_dets:
+                    det_payload = [
+                        {"class_name": d.get("class_name", ""), "confidence": d.get("confidence", 0.0), "bbox": d.get("bbox", [0, 0, 0, 0])}
+                        for d in tracked_dets
+                    ]
+                    asyncio.create_task(client().post(
+                        f"{DISPLAY_URL}/frame", json={"detections": det_payload}, timeout=HEALTH_TIMEOUT,
+                    ))
+
+                # Track how long the tray has been empty
+                if tracked_dets:
+                    _no_det_since = None
+                elif _no_det_since is None:
+                    _no_det_since = time.monotonic()
+
+                tray_empty_long_enough = (
+                    _no_det_since is not None
+                    and (time.monotonic() - _no_det_since) >= _CLEAR_BBOX_SEC
+                )
+
+                if tray_empty_long_enough:
+                    # Clear boxes on display
+                    asyncio.create_task(client().post(
+                        f"{DISPLAY_URL}/frame", json={"detections": []}, timeout=HEALTH_TIMEOUT,
+                    ))
+
+                    if _wait_clear_result == "MATCH":
+                        logger.info("Tray cleared after GOOD — advancing to next set")
+                        current_job = None
+                        _pending_preset = None
+                        current_state = SystemState.READY
+                        mismatch_start_time = None
+                        last_scanned_qr = None
+                        _tracker.reset()
+                        asyncio.create_task(_advance_to_next_set())
+                    else:
+                        logger.info("Tray cleared after NO MATCH — re-arming for re-scan")
+                        _pending_preset = {
+                            "id": current_job["id"],
+                            "target": current_job["target"],
+                            "scan_info": {
+                                "job_id": current_job["scan_info"].get("job_id", current_job["id"]),
+                                "scanned_at": "",
+                                "target": current_job["target"],
+                            },
+                        }
+                        current_job = None
+                        current_state = SystemState.READY
+                        mismatch_start_time = None
+                        last_scanned_qr = None
+                        _tracker.reset()
+
+                    asyncio.create_task(client().post(
+                        f"{DISPLAY_URL}/hud",
+                        json={"border_color": "yellow", "tray_items": [], "center_text": "Por favor, escaneie o codigo QR"},
+                        timeout=HEALTH_TIMEOUT,
+                    ))
+                    _wait_clear_result = None
+                    _no_det_since = None
+
+                # Throttle and continue — skip normal match/error logic
+                elapsed = time.monotonic() - start_time
+                if elapsed < target_interval:
+                    await asyncio.sleep(target_interval - elapsed)
+                continue
+
+            # Build aliased counts from the (already aliased) tracked_dets
+            actual_counts: dict[str, int] = {}
+            for det in tracked_dets:
+                actual_counts[det["class_name"]] = actual_counts.get(det["class_name"], 0) + 1
 
             target_counts = current_job.get("target", {})
             # Total-count mode: target has "total" key → match on sum of all detected objects
@@ -558,15 +650,12 @@ async def _counting_loop() -> None:
                 current_state = SystemState.MATCH
                 mismatch_start_time = None
                 if _match_achieved_at and time.monotonic() - _match_achieved_at >= HOLD_SEC:
-                    logger.info("GOOD status held %.0fs — advancing to next set", HOLD_SEC)
-                    current_job = None
-                    _pending_preset = None
-                    current_state = SystemState.READY
-                    mismatch_start_time = None
+                    # Decision registered — enter WAIT_CLEAR to wait for empty tray
+                    logger.info("GOOD held %.0fs — waiting for tray to clear", HOLD_SEC)
+                    _wait_clear_result = "MATCH"
+                    current_state = SystemState.WAIT_CLEAR
+                    _no_det_since = None
                     _match_achieved_at = None
-                    last_scanned_qr = None
-                    _tracker.reset()
-                    asyncio.create_task(_advance_to_next_set())
                     continue
             else:
                 _match_achieved_at = None
@@ -574,7 +663,6 @@ async def _counting_loop() -> None:
                     current_state = SystemState.READY
                 if actual_counts:
                     if current_state != SystemState.ERROR:
-                        # First NO MATCH: show result and trigger snapshot immediately
                         current_state = SystemState.ERROR
                         _error_achieved_at = time.monotonic()
                         last_scanned_qr = None
@@ -586,28 +674,12 @@ async def _counting_loop() -> None:
                             timeout=HEALTH_TIMEOUT,
                         ))
                     elif _error_achieved_at and time.monotonic() - _error_achieved_at >= HOLD_SEC:
-                        logger.info("NO MATCH held %.0fs — re-arming same tray for re-scan", HOLD_SEC)
-                        # Re-arm same preset so QR scan retries the same tray
-                        _pending_preset = {
-                            "id": current_job["id"],
-                            "target": current_job["target"],
-                            "scan_info": {
-                                "job_id": current_job["scan_info"].get("job_id", current_job["id"]),
-                                "scanned_at": "",
-                                "target": current_job["target"],
-                            },
-                        }
-                        current_job = None
-                        current_state = SystemState.READY
-                        mismatch_start_time = None
+                        # Decision registered — enter WAIT_CLEAR to wait for empty tray
+                        logger.info("NO MATCH held %.0fs — waiting for tray to clear", HOLD_SEC)
+                        _wait_clear_result = "ERROR"
+                        current_state = SystemState.WAIT_CLEAR
+                        _no_det_since = None
                         _error_achieved_at = None
-                        last_scanned_qr = None
-                        _tracker.reset()
-                        asyncio.create_task(client().post(
-                            f"{DISPLAY_URL}/hud",
-                            json={"border_color": "yellow", "tray_items": [], "center_text": "Por favor, escaneie o codigo QR"},
-                            timeout=HEALTH_TIMEOUT,
-                        ))
                         continue
                 else:
                     mismatch_start_time = None
@@ -615,22 +687,41 @@ async def _counting_loop() -> None:
             border_color = {"READY": "yellow", "MATCH": "green", "ERROR": "red"}.get(current_state, "yellow")
             tray_items = enriched_items
 
-            # Forward tracker-smoothed bboxes to display (confirmed tracks only)
+            # Forward tracker-smoothed bboxes to display (confirmed tracks only).
+            # If no detections for _CLEAR_BBOX_SEC, send empty list to clear display boxes.
             display_dets = tracked_dets if tracked_dets else raw_dets
-            if display_active and display_dets:
-                det_payload = [
-                    {
-                        "class_name": d.get("class_name", ""),
-                        "confidence": d.get("confidence", 0.0),
-                        "bbox": d.get("bbox", [0, 0, 0, 0]),
-                    }
-                    for d in display_dets
-                ]
-                asyncio.create_task(client().post(
-                    f"{DISPLAY_URL}/frame",
-                    json={"detections": det_payload},
-                    timeout=HEALTH_TIMEOUT,
-                ))
+            if display_dets:
+                _no_det_since = None
+            else:
+                if _no_det_since is None:
+                    _no_det_since = time.monotonic()
+
+            should_clear = (
+                _no_det_since is not None
+                and (time.monotonic() - _no_det_since) >= _CLEAR_BBOX_SEC
+            )
+
+            if display_active:
+                if display_dets:
+                    det_payload = [
+                        {
+                            "class_name": d.get("class_name", ""),
+                            "confidence": d.get("confidence", 0.0),
+                            "bbox": d.get("bbox", [0, 0, 0, 0]),
+                        }
+                        for d in display_dets
+                    ]
+                    asyncio.create_task(client().post(
+                        f"{DISPLAY_URL}/frame",
+                        json={"detections": det_payload},
+                        timeout=HEALTH_TIMEOUT,
+                    ))
+                elif should_clear:
+                    asyncio.create_task(client().post(
+                        f"{DISPLAY_URL}/frame",
+                        json={"detections": []},
+                        timeout=HEALTH_TIMEOUT,
+                    ))
 
             _fps_counter += 1
             fps_elapsed = time.monotonic() - _fps_start
@@ -845,7 +936,13 @@ async def _sync_match_event(detected_items: list[dict]) -> None:
 async def _trigger_snapshot(devices_resolved: list[dict] | None = None):
     if not current_job: return
     try:
-        body: dict = {"job_id": current_job.get("id"), "reason": "timeout_mismatch"}
+        target = current_job.get("target", {})
+        body: dict = {
+            "job_id": current_job.get("id"),
+            "reason": "timeout_mismatch",
+            "target": target,
+            "detected_items": devices_resolved or [],
+        }
         if devices_resolved:
             body["devices_resolved"] = devices_resolved
         await client().post(f"{FIREBASE_SYNC_URL}/snap", json=body, timeout=3.0)

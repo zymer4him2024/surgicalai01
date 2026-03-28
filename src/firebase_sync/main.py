@@ -668,14 +668,16 @@ async def _write_inspection_round(round_data: dict) -> None:
             while len(slots) < 5:
                 slots.append(None)
 
-            slots[cursor] = {
+            logged_at = dt.datetime.utcnow().isoformat() + "Z"
+            entry = {
                 **round_data,
                 "app_id": APP_ID,
                 "device_id": DEVICE_ID,
                 "project_id": PROJECT_ID,
                 "slot_index": cursor,
-                "logged_at": dt.datetime.utcnow().isoformat() + "Z",
+                "logged_at": logged_at,
             }
+            slots[cursor] = entry
             doc_ref.set({
                 "app_id": APP_ID,
                 "device_id": DEVICE_ID,
@@ -683,6 +685,12 @@ async def _write_inspection_round(round_data: dict) -> None:
                 "slots": slots,
                 "cursor": (cursor + 1) % 5,
                 "updated_at": SERVER_TIMESTAMP,
+            })
+
+            # Append to operations subcollection (unbounded history)
+            db.collection("operations").add({
+                **entry,
+                "timestamp": SERVER_TIMESTAMP,
             })
             logger.info("Inspection round logged → slot %d, result=%s", cursor, round_data.get("result"))
 
@@ -759,15 +767,33 @@ async def _do_load_current_set() -> None:
 async def trigger_snap(body: dict) -> JSONResponse:
     job_id = body.get("job_id", "unknown")
     reason = body.get("reason", "timeout_mismatch")
-    metadata: dict = {"job_id": job_id, "reason": reason, "trigger": "gateway_error_state"}
+    target = body.get("target", {})
+    detected_items = body.get("detected_items", [])
+
+    # Build actual/expected counts from the data gateway sends
+    actual_counts: dict[str, int] = {}
+    for item in detected_items:
+        name = item.get("class_name") or item.get("name", "")
+        if name:
+            actual_counts[name] = actual_counts.get(name, 0) + item.get("count", 1)
+    expected_count = target.get("total", sum(target.values())) if target else 0
+    actual_count = sum(actual_counts.values())
+
+    metadata: dict = {
+        "job_id": job_id,
+        "reason": reason,
+        "trigger": "gateway_error_state",
+        "target": target,
+        "detected": actual_counts,
+    }
     if devices_resolved := body.get("devices_resolved"):
         metadata["devices_resolved"] = devices_resolved
     payload = {
         "event_type": "mismatch",
-        "expected_count": 0,
-        "actual_count": 0,
+        "expected_count": expected_count,
+        "actual_count": actual_count,
         "missing_items": [],
-        "detected_items": [],
+        "detected_items": detected_items,
         "metadata": metadata,
     }
     event_id = _queue.enqueue("mismatch", payload)
