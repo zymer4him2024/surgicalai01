@@ -99,7 +99,7 @@ _pending_preset: dict | None = None
 _latest_tracked_dets: list[dict] = []
 
 _tracker = SurgicalTracker(
-    max_age=5,         # expire dead tracks quickly (instruments are stationary; 5 frames ≈ 1-2s)
+    max_age=10,        # 10 frames covers thermal throttle gaps (at 2fps HOT = 5s; at 5fps NORMAL = 2s)
     min_hits=3,        # require 3 consecutive matches before counting (filters transient noise)
     iou_threshold=0.3, # match threshold for track-detection association
     ema_alpha=0.25,    # low alpha = heavy smoothing (instruments are stationary)

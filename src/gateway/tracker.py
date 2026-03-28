@@ -102,7 +102,11 @@ class Track:
             round(cx + w / 2, 2), round(cy + h / 2, 2),
         ]
 
-        # Class voting: majority vote over last N frames
+        # Class voting: majority vote over last N frames.
+        # Reset history if re-matching after a gap — stale votes from a previous
+        # detection burst should not influence the new class assignment.
+        if self.age > 0:
+            self.class_history.clear()
         self.class_history.append(det["class_name"])
         if len(self.class_history) > _CLASS_HISTORY_LEN:
             self.class_history.pop(0)
