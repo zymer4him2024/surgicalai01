@@ -5,6 +5,7 @@
 ![Runtime](https://img.shields.io/badge/Runtime-Docker%20Compose-informational)
 ![Status](https://img.shields.io/badge/Status-Production%20Deployed-brightgreen)
 ![License](https://img.shields.io/badge/License-MIT-green)
+![Claude Code](https://img.shields.io/badge/Dev%20OS-Claude%20Code-blueviolet)
 
 Production-deployed surgical instrument counting system running on Raspberry Pi 5 with Hailo-8 NPU (26 TOPS). A multi-agent microservices platform that performs real-time YOLOv11 inference on surgical trays, enforces count verification against pre-configured instrument sets, and syncs audit records to Firebase asynchronously.
 
@@ -167,3 +168,4 @@ Third-party AI containers are confined to `isolated_ai_bridge` (172.20.1.0/24, `
 - Docker security: non-root users, scoped `device_cgroup_rules` for Hailo-8 only
 - Firestore rules enforce Google authentication on all dashboard access
 - CLAUDE.md and GEMINI.md maintained in sync as AI assistant context
+- CLAUDE.md is the harness engineering contract — Claude Code reads it as system config before every session, encoding architecture decisions, forbidden anti-patterns, and a living troubleshooting ledger
