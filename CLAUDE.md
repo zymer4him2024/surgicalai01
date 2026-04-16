@@ -1,8 +1,13 @@
-# Antigravity Surgical AI - Global Environment & Design Decisions
+# SurgicalAI01 — Agentic OS Configuration
+
+> **This file is the system configuration for Claude Code acting as the development OS for this project.**
+> All architectural decisions, module contracts, and engineering standards are defined here.
+> Changes to module roles, network topology, or port assignments must be reflected in this file.
 
 ## 1. Overview
-This document records global environment settings and key design decisions for the AI object detection and counting system built on Raspberry Pi 5 and Hailo-8.
-CLAUDE.md and GEMINI.md maintain identical content for context synchronization across AI assistants.
+This document records global environment settings and key design decisions for the surgical instrument counting system built on Raspberry Pi 5 + Hailo-8 NPU.
+
+The system is a **multi-agent microservices mesh** — six specialized agents communicating via HTTP on an isolated Docker bridge network, orchestrated by `gateway_agent`. Each agent has a single bounded responsibility. CLAUDE.md and GEMINI.md maintain identical content for context synchronization across AI assistants.
 
 ---
 

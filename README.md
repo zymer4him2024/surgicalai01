@@ -1,171 +1,174 @@
 # SurgicalAI01
 
-![Edge AI](https://img.shields.io/badge/Edge%20AI-Hailo--8%2026TOPS-blue)
-![Platform](https://img.shields.io/badge/Platform-Raspberry%20Pi%205-red)
-![Runtime](https://img.shields.io/badge/Runtime-Docker%20Compose-informational)
-![Status](https://img.shields.io/badge/Status-Production%20Deployed-brightgreen)
-![License](https://img.shields.io/badge/License-MIT-green)
-![Claude Code](https://img.shields.io/badge/Dev%20OS-Claude%20Code-blueviolet)
+> Edge AI surgical instrument counting system built on Raspberry Pi 5 + Hailo-8 NPU.
+> Multi-agent microservices with real-time Firestore-driven state machine and HDMI HUD overlay.
 
-Production-deployed surgical instrument counting system running on Raspberry Pi 5 with Hailo-8 NPU (26 TOPS). A multi-agent microservices platform that performs real-time YOLOv11 inference on surgical trays, enforces count verification against pre-configured instrument sets, and syncs audit records to Firebase asynchronously.
+![Platform](https://img.shields.io/badge/platform-Raspberry%20Pi%205-c51a4a)
+![AI](https://img.shields.io/badge/AI-Hailo--8%20NPU%2026%20TOPS-blueviolet)
+![Inference](https://img.shields.io/badge/inference-YOLOv11%20%2F%20SurgeoNet-blue)
+![Backend](https://img.shields.io/badge/backend-Firebase%20Firestore-orange)
+![Container](https://img.shields.io/badge/runtime-Docker%20Compose-2496ed)
+![License](https://img.shields.io/badge/license-Proprietary-lightgrey)
 
-> Live dashboard: `https://surgicalai01.web.app`
+---
+
+## Overview
+
+SurgicalAI01 is a production-deployed, edge-native surgical tray inspection system. A QR scan triggers an autonomous counting loop: the gateway agent pulls camera frames, runs hardware-accelerated YOLOv8/YOLOv11 inference on the Hailo-8 NPU, evaluates counts against a preset target, and drives an HDMI HUD overlay — all within a Docker Compose microservice mesh running on a Raspberry Pi 5.
+
+Errors automatically trigger asynchronous Firebase Storage snapshot uploads with full Firestore audit trail. A web dashboard (Firebase Hosting) provides admin monitoring and company-facing pass-rate reporting.
+
+**Live deployment**: `https://surgicalai01.web.app`
 
 ---
 
 ## Architecture
 
-```
-┌─────────────────────────── antigravity_bridge 172.20.0.0/16 ──────────────────────────┐
-│                                                                                        │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐         │
-│  │ camera_agent │    │inference_agent│   │ display_agent│    │firebase_sync │         │
-│  │   :8002      │───▶│   :8001      │    │   :8003      │    │   :8004      │         │
-│  │ 4K USB Cam   │    │ Hailo-8 NPU  │    │ HDMI HUD     │    │ Async Sync   │         │
-│  └──────┬───────┘    └──────┬───────┘    └──────▲───────┘    └──────▲───────┘         │
-│         │                   │                   │                   │                 │
-│         └───────────────────▼───────────────────┤                   │                 │
-│                    ┌─────────────────┐           │                   │                 │
-│                    │  gateway_agent  │───────────┴───────────────────┘                 │
-│                    │     :8000       │  Orchestrator — state machine + counting loop   │
-│                    │  QR → READY →   │                                                 │
-│                    │  COUNT → MATCH  │                                                 │
-│                    └────────┬────────┘                                                 │
-│                             │                                                          │
-│                    ┌────────▼────────┐                                                 │
-│                    │ device_master   │  FDA label mapping + customer catalog           │
-│                    │   :8005         │                                                 │
-│                    └─────────────────┘                                                 │
-└────────────────────────────────────────────────────────────────────────────────────────┘
-                             │
-                    ┌────────▼────────┐         ┌─────────────────────┐
-                    │    Firebase     │────────▶ │  Web Dashboard      │
-                    │  Firestore +    │          │  surgicalai01.web.app│
-                    │   Storage       │          │  (Admin + Company)  │
-                    └─────────────────┘          └─────────────────────┘
+```mermaid
+graph TD
+    QR[QR Code Scan] --> GW[gateway_agent :8000]
+    GW -->|POST /inference| INF[inference_agent :8001\nHailo-8 NPU]
+    GW -->|GET /frame| CAM[camera_agent :8002\n4K USB Camera]
+    GW -->|POST /hud| DSP[display_agent :8003\nHDMI HUD]
+    GW -->|async| FB[firebase_sync_agent :8004\nFirestore + Storage]
+    GW -->|catalog lookup| DM[device_master_agent :8005\nFDA Label Mapping]
+    GW -.->|3rd-party adapter| MOCK[mock_external_ai :8006\nAir-gapped Network]
+    FB --> CLOUD[(Firebase Cloud\nFirestore / Storage)]
+    CLOUD --> DASH[Web Dashboard\nsurgicalai01.web.app]
 ```
 
-### Agent Roster
+### Network Topology
 
-| Agent | Container | IP | Port | Role |
-|---|---|---|---|---|
-| Gateway | `gateway_agent` | 172.20.0.10 | 8000 | Orchestrator, QR decode, autonomous counting loop |
-| Inference | `inference_agent` | 172.20.0.11 | 8001 | Hailo-8 YOLOv11 — 14-class surgical instrument detection |
-| Camera | `camera_agent` | 172.20.0.12 | 8002 | 4K USB camera frame capture |
-| Display | `display_agent` | 172.20.0.13 | 8003 | HDMI HUD, bounding box overlay, double-buffered rendering |
-| Firebase Sync | `firebase_sync_agent` | 172.20.0.14 | 8004 | Async Firestore write + error snapshot upload |
-| Device Master | `device_master_agent` | 172.20.0.15 | 8005 | FDA instrument label mapping, customer catalog bridge |
+| Bridge | Subnet | Purpose |
+|--------|--------|---------|
+| `antigravity_bridge` | `172.20.0.0/16` | Internal service mesh — all Antigravity containers |
+| `isolated_ai_bridge` | `172.20.1.0/24` | Air-gapped (`internal: true`) — 3rd-party AI containers |
+| `gas_bridge` | `172.21.0.0/16` | Gas cylinder inventory application (separate RPi) |
 
 ---
 
-## State Machine
+## Agent Roles
 
-The Gateway Agent runs a pull-based autonomous loop. No external trigger is needed once a job is active.
+| Agent | Container | Port | Responsibility |
+|-------|-----------|------|----------------|
+| **Gateway** | `gateway_agent` | 8000 | QR decode, state machine (READY → MATCH → ERROR), autonomous counting loop |
+| **Inference** | `inference_agent` | 8001 | Hailo-8 NPU inference — YOLOv11 / SurgeoNet (14-class surgical tools) |
+| **Camera** | `camera_agent` | 8002 | 4K USB frame capture (internal only) |
+| **Display** | `display_agent` | 8003 | HDMI HUD overlay — double-buffered, bounding boxes, status borders |
+| **Firebase Sync** | `firebase_sync_agent` | 8004 | Async Firestore history + Storage snapshot upload on error |
+| **Device Master** | `device_master_agent` | 8005 | FDA label mapping: `forceps` → `Tissue Forceps, Ring (FDA Class I)` |
+| **Mock External AI** | `mock_external_ai` | 8006 | Simulated 3rd-party inference for adapter integration testing |
+
+### State Machine
 
 ```
-IDLE
-  │  (QR scan detected)
-  ▼
-READY  ── yellow HUD border ── "Scan QR to Begin"
-  │  (job loaded from Firestore preset)
-  ▼
-COUNTING  ── live inference every frame ── bounding boxes on HDMI
-  │
-  ├── count == target  ──▶  MATCH  (green HUD, Firebase sync, 5s auto-advance)
-  │
-  └── count ≠ target for 5s  ──▶  ERROR  (red blinking HUD, 3-snapshot upload to Storage)
-                                      │
-                                      ▼
-                                  WAIT_CLEAR  ── waits for empty tray ──▶  IDLE
+[IDLE] ──QR scan──→ [READY / Yellow] ──count match──→ [MATCH / Green]
+                          │                                    │
+                     5s mismatch                         auto-advance
+                          │                                    │
+                          └──────────→ [ERROR / Red] ←─────────┘
+                                             │
+                                      async snapshot
+                                      → Firebase Storage
 ```
 
 ---
 
 ## Tech Stack
 
-| Layer | Technology |
-|---|---|
-| Edge hardware | Raspberry Pi 5 (8GB) + Hailo-8 M.2 HAT+ (26 TOPS) |
-| Inference model | YOLOv11 / SurgeoNet — 14 surgical instrument classes |
-| Agent runtime | Python 3.11, FastAPI, Docker Compose |
-| Inter-agent comms | HTTP/JSON over Docker bridge network |
-| State store | Firebase Firestore (`job_config/{deviceId}`, `sync_events`) |
-| Media storage | Firebase Storage (error snapshots, 3 frames on mismatch) |
-| HDMI display | OpenCV X11 overlay, double-buffered, 15 FPS |
-| Web dashboard | Vanilla HTML/CSS/JS + Firebase v10 SDK |
-| Code quality | Ruff (lint/format), Pyright (type check), pytest (TDD) |
+- **Edge device**: Raspberry Pi 5 (8GB), 64-bit OS
+- **AI accelerator**: Hailo-8 M.2 (26 TOPS), PCIe Gen3
+- **Models**: YOLOv11 / SurgeoNet (14 surgical instrument classes), CONF_THRESHOLD=0.35
+- **Inference runtime**: HailoRT SDK inside Docker (`/dev/hailo0` device passthrough)
+- **Orchestration**: Docker Compose, `antigravity_bridge` internal network
+- **Backend**: Firebase Firestore (state, audit log), Firebase Storage (error snapshots)
+- **Dashboard**: Firebase Hosting — Vanilla JS + Tailwind CSS + Chart.js
+- **Language**: Python 3.11, FastAPI, OpenCV
+- **Quality**: Ruff (lint/format), Pyright (type check), pytest (TDD)
 
 ---
 
 ## Quick Start
 
-### Mac — Simulation Mode
+### Mac (Simulation Mode)
+
 ```bash
 docker compose -f docker-compose.mac.yml up -d --build
 ```
 
-### Raspberry Pi 5 — Production
-```bash
-# First-time setup (run once, requires reboots between steps)
-chmod +x scripts/*.sh
-./scripts/setup_hailo.sh    # Hailo-8 driver — reboot after
-./scripts/setup_docker.sh   # Docker CE — re-login after
-./scripts/optimize_rpi5.sh  # RPi5 perf tuning — reboot after
+### Raspberry Pi 5 + Hailo-8 (Production)
 
-# Start system
+```bash
+# 1. Install Hailo-8 driver and Docker
+chmod +x scripts/*.sh
+./scripts/setup_hailo.sh   # reboot after
+./scripts/setup_docker.sh
+
+# 2. Optimize RPi5 performance
+./scripts/optimize_rpi5.sh  # reboot after
+
+# 3. Pre-flight check (expect 0 FAILs)
+./scripts/check_system.sh
+
+# 4. Launch
 docker compose up -d --build
 ```
 
-### Health Check
-```bash
-curl http://localhost:8000/health
-curl http://localhost:8000/status
-```
+### E2E Test (Post-Deploy Verification)
 
-### Trigger Manual Job
 ```bash
+# Trigger a test job
 curl -X POST http://localhost:8000/job \
   -H "Content-Type: application/json" \
-  -d '{"job_id":"TRAY-001","target":{"scalpel":1,"forceps":2}}'
+  -d '{"job_id":"DEPLOY-TEST-001","target":{"scalpel":1}}'
+
+# Check system health
+curl http://localhost:8000/health
+curl http://localhost:8001/metrics
 ```
 
 ---
 
-## Extended Application: Gas Cylinder Inventory
+## Multi-Application Support (`APP_ID`)
 
-A second application (`APP_ID=inventory_count`) for gas cylinder counting runs on a separate RPi using the same agent architecture on an isolated `gas_bridge` (172.21.0.0/16) network.
+The same codebase runs multiple deployments via the `APP_ID` environment variable:
+
+| APP_ID | Application | Network | Notes |
+|--------|-------------|---------|-------|
+| `surgical` | Surgical instrument counting | `antigravity_bridge` | Primary — RPi5 |
+| `inventory_count` | Gas cylinder inventory (Bringel) | `gas_bridge` | Separate RPi, ports 8010/8013 |
+
+---
+
+## Firebase Production Setup
 
 ```bash
-docker compose -f docker-compose.gas.yml up -d --build      # RPi
-docker compose -f docker-compose.gas.mac.yml up -d --build  # Mac simulation
+# Download service account key from Firebase Console
+cp ~/Downloads/firebase-service-account.json ./firebase-credentials.json
+echo "FIREBASE_CREDENTIALS_PATH=/app/firebase-credentials.json" >> .env
 ```
-
----
-
-## Network Isolation for Third-Party AI
-
-Third-party AI containers are confined to `isolated_ai_bridge` (172.20.1.0/24, `internal: true`) — no outbound internet access. The Gateway is dual-homed and includes a `_normalize_inference_response` adapter to translate external schemas.
 
 ---
 
 ## Documentation
 
 | Document | Description |
-|---|---|
-| [CLAUDE.md](./CLAUDE.md) | Full AI assistant context, design decisions, troubleshooting ledger |
-| [docs/rpi_onboarding_guide.md](./docs/rpi_onboarding_guide.md) | RPi5 + Hailo-8 first-time deployment |
-| [docs/integration_architecture.md](./docs/integration_architecture.md) | System integration specification |
-| [docs/3rd_party_ai_inference_spec.md](./docs/3rd_party_ai_inference_spec.md) | External AI adapter protocol |
-| [docs/device_master_catalog_spec.md](./docs/device_master_catalog_spec.md) | FDA instrument catalog and mapping |
+|----------|-------------|
+| [CLAUDE.md](./CLAUDE.md) | Agentic OS config — architecture, dev commands, design rules |
+| [docs/rpi_onboarding_guide.md](./docs/rpi_onboarding_guide.md) | RPi5 setup and SSH troubleshooting |
+| [docs/integration_architecture.md](./docs/integration_architecture.md) | Full system integration spec |
+| [docs/3rd_party_ai_inference_spec.md](./docs/3rd_party_ai_inference_spec.md) | 3rd-party AI adapter protocol |
+| [docs/customer_api_spec.md](./docs/customer_api_spec.md) | Device Master API reference |
+| [GEMINI.md](./GEMINI.md) | Gemini AI context (mirrors CLAUDE.md) |
 
 ---
 
 ## Engineering Standards
 
-- SOLID principles — no God-classes, no global state
-- TDD with pytest — business logic requires tests
-- All secrets via `.env` — never committed to version control
-- Docker security: non-root users, scoped `device_cgroup_rules` for Hailo-8 only
-- Firestore rules enforce Google authentication on all dashboard access
-- CLAUDE.md and GEMINI.md maintained in sync as AI assistant context
-- CLAUDE.md is the harness engineering contract — Claude Code reads it as system config before every session, encoding architecture decisions, forbidden anti-patterns, and a living troubleshooting ledger
+This project enforces SOLID principles, TDD, and container security boundaries.
+
+- **No God classes.** Each agent has exactly one responsibility.
+- **No global state leakage** across container boundaries — all inter-agent communication via HTTP on the internal bridge.
+- **Async-first** for any I/O that doesn't affect the counting loop (Firebase writes, snapshot uploads).
+- **Hardware isolation**: Hailo-8 device access restricted to `inference_agent` via `device_cgroup_rules`.
+- Code review authority: **[CLAUDE.md](./CLAUDE.md)**
