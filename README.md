@@ -40,7 +40,7 @@ graph TD
 ### Network Topology
 
 | Bridge | Subnet | Purpose |
-|--------|--------|---------|
+|--------|--------|--------|
 | `antigravity_bridge` | `172.20.0.0/16` | Internal service mesh — all Antigravity containers |
 | `isolated_ai_bridge` | `172.20.1.0/24` | Air-gapped (`internal: true`) — 3rd-party AI containers |
 | `gas_bridge` | `172.21.0.0/16` | Gas cylinder inventory application (separate RPi) |
@@ -147,6 +147,35 @@ The same codebase runs multiple deployments via the `APP_ID` environment variabl
 cp ~/Downloads/firebase-service-account.json ./firebase-credentials.json
 echo "FIREBASE_CREDENTIALS_PATH=/app/firebase-credentials.json" >> .env
 ```
+
+---
+
+## Ecosystem Position
+
+SurgicalAI01 is the **primary production edge AI deployment** of the Antigravity platform — deployed in surgical environments, enforcing real-time instrument verification at sub-100ms latency.
+
+```
+TeleiosAI01 (Studio)  →  model.hef (SurgeoNet 14-class)
+                                      ↓
+                         inference_agent (Hailo-8, port 8001)
+                                      ↓
+QR scan → gateway_agent → camera_agent → inference → display_agent (HDMI)
+               │                                            │
+               └──────── firebase_sync_agent ───────────────┘
+                                   ↓
+               Firebase Firestore (audit trail, preset config)
+                                   ↓
+               AI OD Counter Multitenant (aggregated views)
+                                   ↓
+               surgicalai01.web.app (admin dashboard)
+```
+
+| Role | Project | Connection |
+|---|---|---|
+| Model factory | [TeleiosAI01](https://github.com/zymer4him2024/teleiosai01) | Produces `model.hef` + `labels.json` consumed by `inference_agent` |
+| Count aggregation | [AI OD Counter Multitenant](https://github.com/zymer4him2024/ai-od-counter-multitenant) | Receives per-tenant count events from Firestore |
+| Reference architecture | [aiodRPicamera01](https://github.com/zymer4him2024/aiodrpicamera01) | The Orchestrator + agent pattern this system extends with a state machine and HDMI display |
+| UI design system | [ui-platform](https://github.com/zymer4him2024/ui-platform) | Design tokens and component patterns for the web dashboard |
 
 ---
 
