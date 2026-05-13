@@ -9,6 +9,7 @@
 ![Backend](https://img.shields.io/badge/backend-Firebase%20Firestore-orange)
 ![Container](https://img.shields.io/badge/runtime-Docker%20Compose-2496ed)
 ![License](https://img.shields.io/badge/license-Proprietary-lightgrey)
+![Claude Code](https://img.shields.io/badge/Dev%20OS-Claude%20Code-blueviolet)
 
 ---
 
