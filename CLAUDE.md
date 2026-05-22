@@ -207,6 +207,7 @@ curl http://localhost:8000/health
 
 # Access Inference (Module A) backend directly from inside network
 docker exec inference_agent curl -s -X POST http://localhost:8001/inference -F "image=@/path/test.jpg"
+```
 
 ### API & Deployment Documentation
 - [RPi Onboarding & Deployment Guide](docs/rpi_onboarding_guide.md)
@@ -214,7 +215,6 @@ docker exec inference_agent curl -s -X POST http://localhost:8001/inference -F "
 - [3rd Party AI Inference Integration](docs/3rd_party_ai_inference_spec.md)
 - [Customer Device Master API](docs/customer_api_spec.md)
 - [Device Master Catalog & Mapping](docs/device_master_catalog_spec.md)
-```
 
 ---
 
