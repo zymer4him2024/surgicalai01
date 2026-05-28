@@ -202,3 +202,12 @@ This project enforces SOLID principles, TDD, and container security boundaries.
 - **Async-first** for any I/O that doesn't affect the counting loop (Firebase writes, snapshot uploads).
 - **Hardware isolation**: Hailo-8 device access restricted to `inference_agent` via `device_cgroup_rules`.
 - Code review authority: **[CLAUDE.md](./CLAUDE.md)**
+
+---
+
+## Platform Resources
+
+| Resource | Description |
+|---|---|
+| [Platform Overview (TECHNOLOGY.md)](https://github.com/zymer4him2024/ui-platform/blob/main/docs/TECHNOLOGY.md) | Full Antigravity platform narrative — all 8 projects, agentic OS philosophy, harness engineering methodology |
+| [Marketing Assets (MARKETING.md)](https://github.com/zymer4him2024/ui-platform/blob/main/docs/MARKETING.md) | Platform positioning, value propositions, competitive analysis, key metrics |
