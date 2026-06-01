@@ -405,3 +405,16 @@ docker compose up -d <service_name>
 33. **Firestore 404 during manual job trigger**: `firestore_client.py` used `.update()` which fails if the job document wasn't pre-created by the dashboard. Fix: use `.set(data, merge=True)` for all status/log updates.
 34. **Hailo Optimization `EOFError` / NMS failure**: Some models fail optimization due to unsupported DFL or NMS layers in the model script. Fix: implemented `_hailo_optimize` retry logic that strips the `--model-script` flag if the first attempt fails.
 35. **RPi SSH "Host Unreachable"**: RPi IP shifted from `.179` to `.180`. Fix: scanned local network with `arp -a`, updated SSH config, and added IP discovery steps to onboarding guide.
+
+---
+
+## ui-platform Alignment
+
+The SurgicalAI01 web dashboard is currently deployed as vanilla HTML/CSS/JS with Tailwind CSS and Firebase v10 SDK. When migrating to a framework or building new dashboard pages, follow the Antigravity shared design system:
+
+- Reference [ui-platform](https://github.com/zymer4him2024/ui-platform) for shared components, hooks, and page templates
+- Use `DashboardLayout` for the admin shell, `MonitoringView` for stat cards and live inspection feeds, `KioskLayout` for embedded or kiosk-mode OR display screens
+- Import shared components from `@repo/ui` — Button, Card, Badge, Table, Dialog
+- Use `@repo/firebase` hooks: `useAuth`, `useFirestoreCollection` (supports named Firestore databases)
+- Design tokens: brand blue `#3b82f6`, Inter font, Zinc neutral scale, 4px spacing grid
+- All new UI work must follow the mandatory rules in [ui-platform CLAUDE.md](https://github.com/zymer4him2024/ui-platform/blob/main/CLAUDE.md)
