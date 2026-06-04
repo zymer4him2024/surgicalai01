@@ -130,6 +130,32 @@ curl http://localhost:8001/metrics
 
 ---
 
+## Manufacturer Integration Layer
+
+SurgicalAI01 includes a production manufacturer catalog integration pipeline for mapping heterogeneous supplier SKUs to SurgeoNet inference class names.
+
+### Semantic SKU Mapper (`scripts/semantic_map_skus.py`)
+
+A two-stage embedding pipeline: multilingual product names are first translated to English (`deep-translator`), then embedded with `all-mpnet-base-v2` for English-to-English cosine similarity. This prevents domain clustering — surgical instruments map to instruments, not to generic medical categories.
+
+| Score Range | Action | Notes |
+|---|---|---|
+| ≥ 0.60 | AUTO-MAP | High-confidence automatic assignment |
+| 0.40–0.60 | REVIEW | Flagged for human review |
+| < 0.40 | UNMAPPED | No assignment — needs manual entry |
+
+### Manufacturer Adapters
+
+Three adapters normalize heterogeneous API response schemas to a standard `{sku, name, manufacturer}` format before semantic mapping:
+
+| Adapter | File | Source Language | Notes |
+|---|---|---|---|
+| Edlo | `adapters/edlo_adapter.py` | Portuguese (PT) | Normalize Edlo product API response |
+| Rhosse | `adapters/rhosse_adapter.py` | Portuguese (PT) | Normalize Rhosse product API response |
+| Bahadir | `adapters/bahadir_adapter.py` | Turkish / German / English | Multi-language normalization |
+
+---
+
 ## Multi-Application Support (`APP_ID`)
 
 The same codebase runs multiple deployments via the `APP_ID` environment variable:
