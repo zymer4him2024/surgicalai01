@@ -231,6 +231,20 @@ This project enforces SOLID principles, TDD, and container security boundaries.
 
 ---
 
+## Harness Engineering
+
+Development on this project is driven by Claude Code with `CLAUDE.md` as the system configuration. The harness encodes:
+
+- **Architecture invariants**: port assignments, network topology, agent responsibilities — violations are flagged as bugs, not trade-offs
+- **Module contracts**: each agent's HTTP interface, Docker Compose network isolation, and Hailo-8 device access rules
+- **Forbidden patterns**: polling for live data, hardcoded Firebase config, direct Hailo SDK access outside `inference_agent`
+- **Quality gates**: Ruff (lint), Pyright (types), pytest (TDD) — all must pass before any task is marked complete
+- **Troubleshooting ledger**: 35-entry log of real hardware and software bugs (PCIe detection, HDMI overlay, Hailo SDK SHM) — no bug is ever fixed twice
+
+The 35-entry ledger in [CLAUDE.md](./CLAUDE.md) encodes every non-obvious production issue encountered running real Hailo-8 hardware — from PCIe kernel module quirks to Docker IPC shared memory constraints. Any AI-assisted session starts with this context loaded and enforced.
+
+---
+
 ## Platform Resources
 
 | Resource | Description |
